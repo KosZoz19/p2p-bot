@@ -700,6 +700,3 @@ async def main():
 
     # важно: разрешаем все используемые типы апдейтов (в т.ч. chat_join_request)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-
-if __name__ == "__main__":
-    asyncio.run(main())
