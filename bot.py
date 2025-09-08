@@ -139,7 +139,6 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is required in .env")
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
-dp = Dispatcher()
 
 DEEP_LINK = ""  # заполним в main()
 PENDING_JOIN: dict[int, int] = {}  # user_id -> chat_id (канал), для последующего approve
@@ -700,3 +699,4 @@ async def main():
 
     # важно: разрешаем все используемые типы апдейтов (в т.ч. chat_join_request)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+
