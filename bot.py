@@ -5,10 +5,9 @@ import logging
 from pathlib import Path
 from time import time
 from typing import Dict, Any
-
+from aiogram.types import Update
 from aiogram.enums.chat_member_status import ChatMemberStatus
 from aiogram.enums.chat_member_status import ChatMemberStatus
-from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
@@ -19,6 +18,9 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.exceptions import TelegramForbiddenError
 from dotenv import load_dotenv
+load_dotenv(override=True)
+from aiohttp import web
+from aiogram import Bot, Dispatcher, Router, F
 
 logging.basicConfig(level=logging.INFO)
 
@@ -29,9 +31,15 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 load_dotenv()
 BOT_TOKEN   = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is required")
+RUN_MODE = os.getenv("RUN_MODE", "polling")  # "webhook" on Render, "polling" locally
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "supersecret")
+RENDER_EXTERNAL_URL = os.getenv("https://p2p-bot-58zg.onrender.com")  # e.g. https://<service>.onrender.com
 SITE_URL    = os.getenv("SITE_URL", "https://koszoz19.github.io/p2p/")
 LESSON_URL  = os.getenv("LESSON_URL", SITE_URL)
 CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0") or 0)  # запасной ID канала (-100...)
+PORT = int(os.getenv("PORT", "10000"))
 
 # отдельные ссылки на уроки
 LESSON1_URL = os.getenv("LESSON1_URL", LESSON_URL)
@@ -139,7 +147,7 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is required in .env")
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
-
+router = Router()
 DEEP_LINK = ""  # заполним в main()
 PENDING_JOIN: dict[int, int] = {}  # user_id -> chat_id (канал), для последующего approve
 
@@ -179,7 +187,15 @@ def can_pm(uid: int) -> bool:
     return bool(d.get("users", {}).get(str(uid), {}).get("pm_ok", False))
 
 # ========= КНОПКИ =========
-@dp.chat_join_request()
+async def run_polling():
+    dp = Dispatcher()
+    dp.include_router(router)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception:
+        pass
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+@router.chat_join_request()
 async def on_join_request(req: ChatJoinRequest):
     uid = req.from_user.id
 
@@ -444,7 +460,7 @@ async def remind_if_not_opened(user_id: int, stage_expected: int, delay: int):
             logging.warning("PM reminder failed: %s", e)
 
 # ========= /start =========
-@dp.message(Command("start"))
+@router.message(Command("start"))
 async def on_start(m: Message):
     set_stage(m.from_user.id, 0)
     await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG, reply_markup=kb_access())
@@ -457,8 +473,8 @@ async def _approve_later(chat_id: int, user_id: int):
         logging.warning("Approve later failed: %s", e)
 
 
-@dp.callback_query(F.data.startswith("open:"))
-@dp.callback_query(F.data.startswith("open:"))
+@router.callback_query(F.data.startswith("open:"))
+@router.callback_query(F.data.startswith("open:"))
 async def on_open(cb: CallbackQuery):
     await cb.answer()
     try:
@@ -506,7 +522,7 @@ async def on_open(cb: CallbackQuery):
         await cb.message.answer("Поздравляю! 🎉 Ты получил доступ к третьему уроку.")
         await send_block(cb.message.chat.id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
         await send_block(cb.message.chat.id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
-@dp.callback_query(F.data.startswith("done:"))
+@router.callback_query(F.data.startswith("done:"))
 async def on_done(cb: CallbackQuery):
     await cb.answer()
     try:
@@ -528,7 +544,7 @@ async def on_done(cb: CallbackQuery):
         await send_block(cb.message.chat.id, "", AFTER_L2)
         await send_block(cb.message.chat.id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
 # ========= ТИХИЙ on_join_request (без постов в канал) =========
-@dp.callback_query(F.data == "check_diary")
+@router.callback_query(F.data == "check_diary")
 async def check_diary(cb: CallbackQuery):
     await cb.answer()
     uid = cb.from_user.id
@@ -585,7 +601,7 @@ async def _send_l3_video_later(chat_id: int, delay: int | None = None):
             logging.warning("L3 followup send failed: %s / %s", e, ee)
 
 # /test_l3 теж читає ту саму змінну:
-@dp.message(Command("test_l3"))
+@router.message(Command("test_l3"))
 async def test_l3(m: Message):
     fid = L3_FOLLOWUP_FILE_ID
     if not fid:
@@ -599,13 +615,13 @@ async def test_l3(m: Message):
             return await m.answer("✅ Надіслано як звичайне відео", parse_mode=None)
     except Exception as e:
         await m.answer(f"❌ Не вдалося надіслати: {e}", parse_mode=None)
-@dp.message(F.forward_from_chat)
+@router.message(F.forward_from_chat)
 async def on_forwarded_from_channel(message: Message):
     ch = message.forward_from_chat
     await message.answer(
         f"Название: {ch.title}\nID: <code>{ch.id}</code>"
     )
-@dp.chat_join_request()
+@router.chat_join_request()
 async def on_join_request(req: ChatJoinRequest):
     uid = req.from_user.id
     PENDING_JOIN[uid] = req.chat.id
@@ -621,7 +637,7 @@ async def on_join_request(req: ChatJoinRequest):
         logging.warning("PM send failed: %s", e)
 
 # ========= /diag и /stats =========
-@dp.message(Command("diag"))
+@router.message(Command("diag"))
 async def diag(m: Message):
     me = await bot.get_me()
     await m.answer(
@@ -631,7 +647,7 @@ async def diag(m: Message):
         parse_mode=ParseMode.MARKDOWN
     )
 
-@dp.message(Command("stats"))
+@router.message(Command("stats"))
 async def stats(m: Message):
     if ADMIN_ID and m.from_user.id != ADMIN_ID:
         return
@@ -664,8 +680,25 @@ def extract_file_id(msg: Message):
     if ct == ContentType.LOCATION and msg.location:
         return None, ct
     return None, ct
-
-@dp.message()  # будь-яке повідомлення у боті/групі
+async def on_startup(app: web.Application):
+    await bot.delete_webhook(drop_pending_updates=True)
+    if not RENDER_EXTERNAL_URL:
+        raise RuntimeError("RENDER_EXTERNAL_URL is required for webhook mode")
+    await bot.set_webhook(
+        url=f"{RENDER_EXTERNAL_URL}/webhook/{WEBHOOK_SECRET}",
+        secret_token=WEBHOOK_SECRET,
+    )
+async def on_shutdown(app: web.Application):
+    await bot.session.close()
+async def handle_webhook(request: web.Request):
+    if request.match_info.get("token") != WEBHOOK_SECRET:
+        return web.Response(status=403)
+    data = await request.json()
+    update = Update.model_validate(data)
+    dp = request.app["dp"]              # get dp from app context
+    await dp.feed_update(bot, update)
+    return web.Response(text="OK")    
+@router.message()  # будь-яке повідомлення у боті/групі
 async def any_dm_message(message: Message):
     fid, ct = extract_file_id(message)
     if fid:
@@ -675,7 +708,7 @@ async def any_dm_message(message: Message):
     else:
         await message.reply(f"content_type: <b>{ct}</b>\n(для цього типу немає file_id)")
 
-@dp.channel_post()  # будь-який пост у каналі (бот має бачити повідомлення)
+@router.channel_post()  # будь-який пост у каналі (бот має бачити повідомлення)
 async def any_channel_post(message: Message):
     fid, ct = extract_file_id(message)
     if fid:
@@ -684,7 +717,15 @@ async def any_channel_post(message: Message):
         )
     else:
         await message.reply(f"content_type: <b>{ct}</b>\n(немає file_id)")    
-
+def make_web_app():
+    app = web.Application()
+    dp = Dispatcher()
+    dp.include_router(router)
+    app["dp"] = dp
+    app.router.add_post(f"/webhook/{{token}}", handle_webhook)
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+    return app
 # ========= main =========
 async def main():
     global DEEP_LINK
@@ -698,5 +739,10 @@ async def main():
         pass
 
     # важно: разрешаем все используемые типы апдейтов (в т.ч. chat_join_request)
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    await router.start_polling(bot, allowed_updates=router.resolve_used_update_types())
 
+if __name__ == "__main__":
+    if RUN_MODE.lower() == "polling":
+        asyncio.run(run_polling())
+    else:
+        web.run_app(make_web_app(), host="0.0.0.0", port=PORT)
