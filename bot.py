@@ -32,13 +32,14 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is required")
 
-RUN_MODE = os.getenv("RUN_MODE", "polling")  # "webhook" on Render, "polling" locally
+RUN_MODE = os.getenv("RUN_MODE", "polling")  # "webhook" for production, "polling" locally
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "supersecret")
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render provides this automatically
+REPLIT_DEV_DOMAIN = os.getenv("REPLIT_DEV_DOMAIN")  # Replit provides this automatically
+EXTERNAL_URL = f"https://{REPLIT_DEV_DOMAIN}" if REPLIT_DEV_DOMAIN else None
 SITE_URL = os.getenv("SITE_URL", "https://koszoz19.github.io/p2p/")
 LESSON_URL = os.getenv("LESSON_URL", SITE_URL)
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0") or 0)  # запасной ID канала (-100...)
-PORT = int(os.getenv("PORT", "10000"))
+PORT = int(os.getenv("PORT", "5000"))
 
 # отдельные ссылки на уроки
 LESSON1_URL = os.getenv("LESSON1_URL", LESSON_URL)
@@ -49,9 +50,8 @@ LESSON3_URL = os.getenv("LESSON3_URL", LESSON_URL)
 BANNER_WELCOME = os.getenv("BANNER_WELCOME", "")
 BANNER_AFTER1 = os.getenv("BANNER_AFTER1", "")
 BANNER_AFTER2 = os.getenv("BANNER_AFTER2", "")
-BANNER_AFTER3 = os.getenv("BANNER_AFTER3", "")
-BANNER_AFTER4 = os.getenv("BANNER_AFTER4", "")
-BANNER_AFTER5 = os.getenv("BANNER_AFTER5", "")
+BANNER_BLOCK6 = os.getenv("BANNER_BLOCK6", "")
+BANNER_BLOCK7 = os.getenv("BANNER_BLOCK7", "")
 
 L3_FOLLOWUP_VIDEO = os.getenv("L3_FOLLOWUP_VIDEO", "")
 L3_FOLLOWUP_CAPTION = os.getenv("L3_FOLLOWUP_CAPTION", "")
@@ -186,11 +186,12 @@ async def is_subscribed_telegram(user_id: int) -> bool:
 def _looks_like_videonote(fid: str) -> bool:
     return fid.startswith("DQAC")  # евристика для video_note
 
-async def _send_l3_video_later(chat_id: int, delay: int = None):
+async def _send_l3_video_later(chat_id: int, delay: int | None = None):
     """Через delay сек. після відкриття уроку 3 надіслати відео Стаса (якщо задано)."""
     if not L3_FOLLOWUP_FILE_ID:
         return
-    await asyncio.sleep(delay if delay is not None else L3_FOLLOWUP_DELAY)
+    sleep_time = delay if delay is not None else L3_FOLLOWUP_DELAY
+    await asyncio.sleep(sleep_time)
     try:
         if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
             await bot.send_video_note(chat_id, L3_FOLLOWUP_FILE_ID)
@@ -206,16 +207,16 @@ async def _send_l3_video_later(chat_id: int, delay: int = None):
 
 async def auto_send_next_lesson(user_id: int, current_lesson: int):
     """Автоматически отправляет следующий урок через 30 минут"""
-    await asyncio.sleep(30 * 0.1)  # 30 минут
+    await asyncio.sleep(30 * 60)  # 30 минут
     
     try:
         if current_lesson == 1:
             # После урока 1 -> отправляем блок и доступ к уроку 2
-            await send_block(user_id, BANNER_AFTER3, AFTER_L1)
+            await send_block(user_id, BANNER_AFTER1, AFTER_L1)
             await bot.send_message(user_id, "Открывай второй урок 👇", reply_markup=kb_open(2))
         elif current_lesson == 2:
             # После урока 2 -> отправляем блок перед уроком 3
-            await send_block(user_id, BANNER_AFTER5, AFTER_L2)
+            await send_block(user_id, "", AFTER_L2)
             await send_block(user_id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
     except Exception as e:
         logging.warning("auto_send_next_lesson failed: %s", e)
@@ -306,7 +307,7 @@ AFTER_L2 = (
     "Большая часть нашего интенсива уже позади 🔥\n\n"
     "Сейчас тебя ждёт третий, заключительный урок, в котором я покажу схему, на которой на твоих глазах "
     "сделаю +2% к начальному депозиту всего за несколько минут. И да — позже ты сможешь просто повторять за мной те же самые шаги!\n\n"
-    "Не откладывай на потом — изучи эту связку прямо сейчас"
+    "Не откладывай на потом — изучи эту связку прямо сейчас. Жми на кнопку ниже и получай доступ 👇"
 )
 
 GATE_BEFORE_L3 = (
@@ -381,11 +382,13 @@ async def remind_if_not_opened(user_id: int, stage_expected: int, delay: int):
 
 @router.message(Command("start"))
 async def on_start(m: Message):
+    if not m.from_user:
+        return
     set_stage(m.from_user.id, 0)
     # Отправляем первый блок без кнопки
     await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG)
     # Отправляем новый блок с описанием урока и кнопкой
-    await send_block(m.chat.id, BANNER_AFTER4, LESSON1_INTRO, reply_markup=kb_access())
+    await send_block(m.chat.id, "", LESSON1_INTRO, reply_markup=kb_access())
 
 async def _approve_later(chat_id: int, user_id: int):
     try:
@@ -396,8 +399,18 @@ async def _approve_later(chat_id: int, user_id: int):
 @router.callback_query(F.data.startswith("open:"))
 async def on_open(cb: CallbackQuery):
     await cb.answer()
+    
+    # Проверяем наличие message и data
+    if not cb.message or not cb.data or not cb.from_user:
+        return
+        
     # Убираем кнопки после нажатия
-    await cb.message.edit_reply_markup(reply_markup=None)
+    try:
+        from aiogram.types import Message as TgMessage
+        if isinstance(cb.message, TgMessage):
+            await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass  # Игнорируем ошибки редактирования
     
     try:
         n = int(cb.data.split(":")[1])
@@ -411,7 +424,7 @@ async def on_open(cb: CallbackQuery):
     # 2) Гейт на подписку перед Уроком 3 (только если настроен телеграм-канал дневника)
     if n == 3 and DIARY_TG_CHAT_ID:
         if not has_diary_request(uid):
-            await send_block(cb.message.chat.id, BANNER_AFTER5, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
+            await send_block(cb.message.chat.id, "", GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
             return
 
     # 3) Отдаём ТОЛЬКО ссылку без кнопок
@@ -429,7 +442,7 @@ async def on_open(cb: CallbackQuery):
 
     # 5) Для урока 3 сразу финальные блоки (после ссылки)
     if n == 3:
-        asyncio.create_task(_send_l3_video_later(cb.message.chat.id))
+        await cb.message.answer("Поздравляю! 🎉 Ты получил доступ к третьему уроку.")
         await send_block(cb.message.chat.id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
         await send_block(cb.message.chat.id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
         asyncio.create_task(_send_l3_video_later(cb.message.chat.id))
@@ -443,8 +456,18 @@ async def on_open(cb: CallbackQuery):
 @router.callback_query(F.data == "check_diary")
 async def check_diary(cb: CallbackQuery):
     await cb.answer()
+    
+    # Проверяем наличие message и from_user
+    if not cb.message or not cb.from_user:
+        return
+        
     # Убираем кнопки после нажатия
-    await cb.message.edit_reply_markup(reply_markup=None)
+    try:
+        from aiogram.types import Message as TgMessage
+        if isinstance(cb.message, TgMessage):
+            await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass  # Игнорируем ошибки редактирования
     
     uid = cb.from_user.id
 
@@ -502,6 +525,9 @@ async def test_l3(m: Message):
 @router.message(F.forward_from_chat)
 async def on_forwarded_from_channel(message: Message):
     ch = message.forward_from_chat
+    if not ch:
+        await message.answer("Ошибка: не удалось получить информацию о канале")
+        return
     await message.answer(
         f"Название: {ch.title}\nID: <code>{ch.id}</code>"
     )
@@ -518,6 +544,8 @@ async def diag(m: Message):
 
 @router.message(Command("stats"))
 async def stats(m: Message):
+    if not m.from_user:
+        return
     if ADMIN_ID and m.from_user.id != ADMIN_ID:
         return
     d = _read()
@@ -568,9 +596,9 @@ async def any_channel_post(message: Message):
 async def on_startup(app: web.Application):
     """Set webhook on startup"""
     await bot.delete_webhook(drop_pending_updates=True)
-    if not RENDER_EXTERNAL_URL:
-        raise RuntimeError("RENDER_EXTERNAL_URL is required for webhook mode")
-    webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{WEBHOOK_SECRET}"
+    if not EXTERNAL_URL:
+        raise RuntimeError("External URL is required for webhook mode. Make sure REPLIT_DEV_DOMAIN is available.")
+    webhook_url = f"{EXTERNAL_URL}/webhook/{WEBHOOK_SECRET}"
     await bot.set_webhook(
         url=webhook_url,
         secret_token=WEBHOOK_SECRET,
