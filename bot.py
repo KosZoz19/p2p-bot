@@ -49,9 +49,9 @@ LESSON3_URL = os.getenv("LESSON3_URL", LESSON_URL)
 BANNER_WELCOME = os.getenv("BANNER_WELCOME", "")
 BANNER_AFTER1 = os.getenv("BANNER_AFTER1", "")
 BANNER_AFTER2 = os.getenv("BANNER_AFTER2", "")
-BANNER_AFTER3= os.getenv("BANNER_AFTER3", "")
+BANNER_AFTER3 = os.getenv("BANNER_AFTER3", "")
 BANNER_AFTER4 = os.getenv("BANNER_AFTER4", "")
-BANNER_AFTER5 = os.getenv('BANNER_AFTER5","")
+BANNER_AFTER5 = os.getenv("BANNER_AFTER5", "")
 
 L3_FOLLOWUP_VIDEO = os.getenv("L3_FOLLOWUP_VIDEO", "")
 L3_FOLLOWUP_CAPTION = os.getenv("L3_FOLLOWUP_CAPTION", "")
@@ -206,7 +206,7 @@ async def _send_l3_video_later(chat_id: int, delay: int = None):
 
 async def auto_send_next_lesson(user_id: int, current_lesson: int):
     """Автоматически отправляет следующий урок через 30 минут"""
-    await asyncio.sleep(30 * 1)  # 30 минут
+    await asyncio.sleep(30 * 60)  # 30 минут
     
     try:
         if current_lesson == 1:
@@ -215,8 +215,8 @@ async def auto_send_next_lesson(user_id: int, current_lesson: int):
             await bot.send_message(user_id, "Открывай второй урок 👇", reply_markup=kb_open(2))
         elif current_lesson == 2:
             # После урока 2 -> отправляем блок перед уроком 3
-            await send_block(user_id, BANNER_AFTER3, AFTER_L2)
-            await send_block(user_id, BANNER_AFTER4, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
+            await send_block(user_id, "", AFTER_L2)
+            await send_block(user_id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
     except Exception as e:
         logging.warning("auto_send_next_lesson failed: %s", e)
 
@@ -279,8 +279,18 @@ WELCOME_LONG = (
     "✅ В интенсиве тебя ждут 3 бесплатных  урока:\n"
     "1️⃣ Что такое P2P в 2025 году и почему это возможность, которую нельзя пропустить.\n"
     "2️⃣ Как я заработал $50 000 и новый Mercedes за 3 месяца\n"
-    "3️⃣ Связка на Р2Р: 60$ за два часа\n\n"
-    "Готов начинать? Жми кнопку «ПОЛУЧИТЬ ДОСТУП» и начинай с первого урока 🔥"
+    "3️⃣ Связка на Р2Р: 60$ за два часа"
+)
+
+LESSON1_INTRO = (
+    "Сейчас перед тобой будет первый урок по P2P-арбитражу, который я подготовил именно для тебя.\n\n"
+    "В нём ты узнаешь:\n"
+    "• что такое P2P и как это работает;\n"
+    "• как P2P существовало ещё тысячи лет назад и почему это вечная профессия;\n"
+    "• что нужно, чтобы начать зарабатывать на P2P.\n\n"
+    "А ещё я подготовил для тебя крутой бонус 🎁 — ты получишь его после просмотра всех трёх уроков.\n"
+    "Поэтому не откладывай на потом и приступай к просмотру прямо сейчас!\n\n"
+    "Готов начинать?"
 )
 
 AFTER_L1 = (
@@ -372,7 +382,10 @@ async def remind_if_not_opened(user_id: int, stage_expected: int, delay: int):
 @router.message(Command("start"))
 async def on_start(m: Message):
     set_stage(m.from_user.id, 0)
-    await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG, reply_markup=kb_access())
+    # Отправляем первый блок без кнопки
+    await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG)
+    # Отправляем новый блок с описанием урока и кнопкой
+    await send_block(m.chat.id, "", LESSON1_INTRO, reply_markup=kb_access())
 
 async def _approve_later(chat_id: int, user_id: int):
     try:
@@ -648,8 +661,3 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
-
-
-
-
-
