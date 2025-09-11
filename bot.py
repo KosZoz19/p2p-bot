@@ -51,6 +51,7 @@ BANNER_AFTER1 = os.getenv("BANNER_AFTER1", "")
 BANNER_AFTER2 = os.getenv("BANNER_AFTER2", "")
 BANNER_AFTER3= os.getenv("BANNER_AFTER3", "")
 BANNER_AFTER4 = os.getenv("BANNER_AFTER4", "")
+BANNER_AFTER5 = os.getenv('BANNER_AFTER5","")
 
 L3_FOLLOWUP_VIDEO = os.getenv("L3_FOLLOWUP_VIDEO", "")
 L3_FOLLOWUP_CAPTION = os.getenv("L3_FOLLOWUP_CAPTION", "")
@@ -647,6 +648,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
