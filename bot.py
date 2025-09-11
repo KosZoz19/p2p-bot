@@ -205,7 +205,7 @@ async def _send_l3_video_later(chat_id: int, delay: int = None):
 
 async def auto_send_next_lesson(user_id: int, current_lesson: int):
     """Автоматически отправляет следующий урок через 30 минут"""
-    await asyncio.sleep(30 * 60)  # 30 минут
+    await asyncio.sleep(30 * 1)  # 30 минут
     
     try:
         if current_lesson == 1:
@@ -647,3 +647,4 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
