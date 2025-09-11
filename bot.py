@@ -18,7 +18,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.exceptions import TelegramForbiddenError
 from dotenv import load_dotenv
-load_dotenv(override=True)
+load_dotenv()
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, F
 
@@ -745,4 +745,5 @@ if __name__ == "__main__":
     if RUN_MODE.lower() == "polling":
         asyncio.run(run_polling())
     else:
+
         web.run_app(make_web_app(), host="0.0.0.0", port=PORT)
