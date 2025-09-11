@@ -203,17 +203,21 @@ async def _send_l3_video_later(chat_id: int, delay: int = None):
         except Exception as ee:
             logging.warning("L3 followup send failed: %s / %s", e, ee)
 
-async def remind_mark_done(user_id: int, n: int, delay: int):
-    await asyncio.sleep(delay)
-    if not is_watched(user_id, n):
-        try:
-            await bot.send_message(
-                user_id,
-                f"Ты уже открыл урок {n}, но не подтвердил просмотр. Если всё посмотрел — нажми кнопку 👇",
-                reply_markup=kb_done(n)
-            )
-        except Exception as e:
-            logging.warning("remind_mark_done failed: %s", e)
+async def auto_send_next_lesson(user_id: int, current_lesson: int):
+    """Автоматически отправляет следующий урок через 30 минут"""
+    await asyncio.sleep(30 * 60)  # 30 минут
+    
+    try:
+        if current_lesson == 1:
+            # После урока 1 -> отправляем блок и доступ к уроку 2
+            await send_block(user_id, BANNER_AFTER1, AFTER_L1)
+            await bot.send_message(user_id, "Открывай второй урок 👇", reply_markup=kb_open(2))
+        elif current_lesson == 2:
+            # После урока 2 -> отправляем блок перед уроком 3
+            await send_block(user_id, "", AFTER_L2)
+            await send_block(user_id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
+    except Exception as e:
+        logging.warning("auto_send_next_lesson failed: %s", e)
 
 # ========= KEYBOARD FUNCTIONS =========
 def kb_access() -> InlineKeyboardMarkup:
@@ -227,10 +231,7 @@ def kb_open(n: int) -> InlineKeyboardMarkup:
     kb.row(InlineKeyboardButton(text=labels[n], callback_data=f"open:{n}"))
     return kb.as_markup()
 
-def kb_done(n: int) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=f"✅ Я посмотрел урок {n}", callback_data=f"done:{n}"))
-    return kb.as_markup()
+# Функция kb_done убрана - теперь автоматическая отправка через 30 минут
 
 def kb_subscribe_then_l3() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
@@ -391,12 +392,7 @@ async def on_open(cb: CallbackQuery):
 
     uid = cb.from_user.id
 
-    # 1) Жёсткая последовательность по "подтвердил просмотр"
-    if n == 2 and not is_watched(uid, 1):
-        return await cb.answer("Сначала подтверди просмотр Урока 1 ✅", show_alert=True)
-
-    if n == 3 and not is_watched(uid, 2):
-        return await cb.answer("Сначала подтверди просмотр Урока 2 ✅", show_alert=True)
+    # Убираем проверки просмотра - уроки доступны по порядку автоматически
 
     # 2) Гейт на подписку перед Уроком 3 (только если настроен телеграм-канал дневника)
     if n == 3 and DIARY_TG_CHAT_ID:
@@ -404,12 +400,12 @@ async def on_open(cb: CallbackQuery):
             await send_block(cb.message.chat.id, "", GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
             return
 
-    # 3) Отдаём ТОЛЬКО ссылку + кнопку "Я посмотрел" для 1 и 2
+    # 3) Отдаём ТОЛЬКО ссылку без кнопок
     URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
     await send_url_only(
         cb.message.chat.id,
         URLS[n],
-        reply_markup=(kb_done(n) if n in (1, 2) else None)
+        reply_markup=None
     )
 
     # 4) Обновляем стадию
@@ -423,28 +419,12 @@ async def on_open(cb: CallbackQuery):
         await send_block(cb.message.chat.id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
         await send_block(cb.message.chat.id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
         asyncio.create_task(_send_l3_video_later(cb.message.chat.id))
-
-@router.callback_query(F.data.startswith("done:"))
-async def on_done(cb: CallbackQuery):
-    await cb.answer()
-    # Убираем кнопки после нажатия
-    await cb.message.edit_reply_markup(reply_markup=None)
     
-    try:
-        n = int(cb.data.split(":")[1])
-    except Exception:
-        return
+    # 6) Запускаем автоматическую отправку следующего урока через 30 минут
+    if n in (1, 2):
+        asyncio.create_task(auto_send_next_lesson(uid, n))
 
-    uid = cb.from_user.id
-    set_watched(uid, n, True)
-
-    if n == 1:
-        await send_block(cb.message.chat.id, BANNER_AFTER1, AFTER_L1)
-        await cb.message.answer("Открывай второй урок 👇", reply_markup=kb_open(2))
-
-    elif n == 2:
-        await send_block(cb.message.chat.id, "", AFTER_L2)
-        await send_block(cb.message.chat.id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
+# Обработчик "done:" убран - теперь автоматическая отправка через 30 минут
 
 @router.callback_query(F.data == "check_diary")
 async def check_diary(cb: CallbackQuery):
