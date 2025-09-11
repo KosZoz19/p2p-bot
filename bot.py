@@ -381,6 +381,9 @@ async def _approve_later(chat_id: int, user_id: int):
 @router.callback_query(F.data.startswith("open:"))
 async def on_open(cb: CallbackQuery):
     await cb.answer()
+    # Убираем кнопки после нажатия
+    await cb.message.edit_reply_markup(reply_markup=None)
+    
     try:
         n = int(cb.data.split(":")[1])
     except Exception:
@@ -424,6 +427,9 @@ async def on_open(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("done:"))
 async def on_done(cb: CallbackQuery):
     await cb.answer()
+    # Убираем кнопки после нажатия
+    await cb.message.edit_reply_markup(reply_markup=None)
+    
     try:
         n = int(cb.data.split(":")[1])
     except Exception:
@@ -443,6 +449,9 @@ async def on_done(cb: CallbackQuery):
 @router.callback_query(F.data == "check_diary")
 async def check_diary(cb: CallbackQuery):
     await cb.answer()
+    # Убираем кнопки после нажатия
+    await cb.message.edit_reply_markup(reply_markup=None)
+    
     uid = cb.from_user.id
 
     if DIARY_TG_CHAT_ID and has_diary_request(uid):
