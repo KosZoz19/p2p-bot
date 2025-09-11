@@ -50,7 +50,7 @@ BANNER_WELCOME = os.getenv("BANNER_WELCOME", "")
 BANNER_AFTER1 = os.getenv("BANNER_AFTER1", "")
 BANNER_AFTER2 = os.getenv("BANNER_AFTER2", "")
 BANNER_AFTER3= os.getenv("BANNER_AFTER3", "")
-BANNER_BLOCK7 = os.getenv("BANNER_BLOCK7", "")
+BANNER_AFTER4 = os.getenv("BANNER_AFTER4", "")
 
 L3_FOLLOWUP_VIDEO = os.getenv("L3_FOLLOWUP_VIDEO", "")
 L3_FOLLOWUP_CAPTION = os.getenv("L3_FOLLOWUP_CAPTION", "")
@@ -215,7 +215,7 @@ async def auto_send_next_lesson(user_id: int, current_lesson: int):
         elif current_lesson == 2:
             # После урока 2 -> отправляем блок перед уроком 3
             await send_block(user_id, BANNER_AFTER3, AFTER_L2)
-            await send_block(user_id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
+            await send_block(user_id, BANNER_AFTER4, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
     except Exception as e:
         logging.warning("auto_send_next_lesson failed: %s", e)
 
@@ -647,6 +647,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
