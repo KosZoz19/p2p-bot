@@ -629,11 +629,32 @@ async def main():
     DEEP_LINK = f"https://t.me/{me.username}?start=from_channel"
     logging.info("Bot: @%s, Deep-link: %s", me.username, DEEP_LINK)
 
+async def run_webhook():
+    """Run webhook server for production"""
+    logging.info("Running in webhook mode on port %s", PORT)
+    global DEEP_LINK
+    me = await bot.get_me()
+    DEEP_LINK = f"https://t.me/{me.username}?start=from_channel"
+    logging.info("Bot: @%s, Deep-link: %s", me.username, DEEP_LINK)
+    
+    app = make_web_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=PORT)
+    await site.start()
+    
+    logging.info("Webhook server started on 0.0.0.0:%s", PORT)
+    # Keep the server running
+    try:
+        await asyncio.Future()  # run forever
+    except KeyboardInterrupt:
+        pass
+    finally:
+        await runner.cleanup()
+
 if __name__ == "__main__":
     if RUN_MODE.lower() == "polling":
         logging.info("Running in polling mode")
         asyncio.run(run_polling())
     else:
-        logging.info("Running in webhook mode on port %s", PORT)
-        asyncio.run(main())  # Initialize bot first
-        web.run_app(make_web_app(), host="0.0.0.0", port=PORT)
+        asyncio.run(run_webhook())
