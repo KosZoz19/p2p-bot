@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: p2p-telegram-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: RUN_MODE
+        value: webhook
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: BOT_TOKEN
+        sync: false  # This needs to be set manually in Render dashboard as a secret
