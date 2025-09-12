@@ -512,6 +512,7 @@ def kb_course() -> InlineKeyboardMarkup:
             return kb.as_markup()
 
 async def send_course_posts(chat_id: int):
+    await asyncio.sleep(5 * 60 * 60)
     while True:  # бесконечный цикл
         for i, text in enumerate(COURSE_POSTS, start=1):
             try:
@@ -838,6 +839,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
