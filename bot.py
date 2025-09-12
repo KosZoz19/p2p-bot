@@ -505,6 +505,20 @@ ACCESS_NUDGE_TEXTS = [
     "Напомню про интенсив: 3 бесплатных урока ждут тебя. Забери доступ 👇",
     "Давай не откладывать — забирай доступ и стартуем прямо сейчас 👇",
 ]
+ # === Рассылка 8 постов по 1 каждые 5 часов ===
+def kb_course() -> InlineKeyboardMarkup:
+            kb = InlineKeyboardBuilder()
+            kb.row(InlineKeyboardButton(text="🔥 Мини курс Р2Р", url=SITE_URL))
+            return kb.as_markup()
+
+async def send_course_posts(chat_id: int):
+            for i, text in enumerate(COURSE_POSTS, start=1):
+                try:
+                    await bot.send_message(chat_id, text, reply_markup=kb_course())
+                except Exception as e:
+                    logging.warning("Failed to send course post %s: %s", i, e)
+                if i < len(COURSE_POSTS):
+                    await asyncio.sleep(1)  # 5 часов
 
 async def access_nurture(user_id: int):
     """Спам до нажатия «ПОЛУЧИТЬ ДОСТУП». Запускать после /start."""
@@ -598,23 +612,6 @@ async def on_open(cb: CallbackQuery):
 
         asyncio.create_task(delayed_blocks(cb.message.chat.id))
         asyncio.create_task(send_course_posts(cb.message.chat.id))
-
- # === Рассылка 8 постов по 1 каждые 5 часов ===
-def kb_course() -> InlineKeyboardMarkup:
-            kb = InlineKeyboardBuilder()
-            kb.row(InlineKeyboardButton(text="🔥 Мини курс Р2Р", url=SITE_URL))
-            return kb.as_markup()
-
-async def send_course_posts(chat_id: int):
-            for i, text in enumerate(COURSE_POSTS, start=1):
-                try:
-                    await bot.send_message(chat_id, text, reply_markup=kb_course())
-                except Exception as e:
-                    logging.warning("Failed to send course post %s: %s", i, e)
-                if i < len(COURSE_POSTS):
-                    await asyncio.sleep(30* 0.1)  # 5 часов
-
-
 # Обработчик "done:" убран - теперь автоматическая отправка через 30 минут
 
 @router.callback_query(F.data == "check_diary")
@@ -838,6 +835,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
