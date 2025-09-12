@@ -347,106 +347,6 @@ BLOCK_7 = (
     "И это только часть того, что ждёт внутри — многое остаётся под завесой 😉\n\n"
     "Чтобы попасть в следующий поток, заполняй гугл-форму ниже или связывайся со мной @"
 )
-
-# ========= ДОСТУП/НАПОМИНАНИЯ =========
-ACCESS_NUDGE_TEXTS = [
-    "Вижу, ты ещё не забрал доступ к урокам. Нажми ниже — начнём с первого 👇",
-    "Напомню про интенсив: 3 бесплатных урока ждут тебя. Забери доступ 👇",
-    "Давай не откладывать — забирай доступ и стартуем прямо сейчас 👇",
-]
-
-async def access_nurture(user_id: int):
-    """Спам до нажатия «ПОЛУЧИТЬ ДОСТУП». Запускать после /start."""
-    for i, delay in enumerate(ACCESS_REM_DELAYS):
-        await asyncio.sleep(delay)
-        if get_stage(user_id) >= 1:
-            break
-        txt = ACCESS_NUDGE_TEXTS[min(i, len(ACCESS_NUDGE_TEXTS) - 1)]
-        try:
-            await bot.send_message(user_id, txt, reply_markup=kb_access())
-        except TelegramForbiddenError:
-            break
-        except Exception as e:
-            logging.warning("PM access nudge failed: %s", e)
-            break
-
-async def remind_if_not_opened(user_id: int, stage_expected: int, delay: int):
-    """Напоминаем открыть урок stage_expected, если через delay он не открыт."""
-    await asyncio.sleep(delay)
-    if get_stage(user_id) < stage_expected:
-        texts = {
-            1: "Вижу, ты ещё не открыл *первый бесплатный урок*. Забирай его сейчас 👇",
-            2: "Напомню: *урок 2* всё ещё ждёт тебя.👇",
-            3: "Остался *урок 3*. Давай доведём до результата 💸👇",
-        }
-        try:
-            await bot.send_message(user_id, texts[stage_expected], reply_markup=kb_open(stage_expected))
-        except Exception as e:
-            logging.warning("PM reminder failed: %s", e)
-
-# ========= HANDLERS =========
-
-@router.message(Command("start"))
-async def on_start(m: Message):
-    set_stage(m.from_user.id, 0)
-    # Отправляем первый блок без кнопки
-    await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG)
-    # Отправляем новый блок с описанием урока и кнопкой
-    await send_block(m.chat.id, BANNER_AFTER4, LESSON1_INTRO, reply_markup=kb_access())
-
-async def _approve_later(chat_id: int, user_id: int):
-    try:
-        await bot.approve_chat_join_request(chat_id, user_id)
-    except Exception as e:
-        logging.warning("Approve later failed: %s", e)
-
-@router.callback_query(F.data.startswith("open:"))
-async def on_open(cb: CallbackQuery):
-    await cb.answer()
-    await cb.message.edit_reply_markup(reply_markup=None)
-
-    try:
-        n = int(cb.data.split(":")[1])
-    except Exception:
-        return
-
-    uid = cb.from_user.id
-
-    if n == 3 and DIARY_TG_CHAT_ID:
-        if not has_diary_request(uid):
-            await send_block(cb.message.chat.id, BANNER_AFTER5, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
-            return
-
-    URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
-    await send_url_only(cb.message.chat.id, URLS[n])
-
-    stage = get_stage(uid)
-    if n > stage:
-        set_stage(uid, n)
-
-    # Урок 1 и 2 → автопереход
-    if n in (1, 2):
-        asyncio.create_task(auto_send_next_lesson(uid, n))
-
-    # Урок 3 → видео, блоки и рассылка постов
-    if n == 3:
-        try:
-            if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
-                await bot.send_video_note(cb.message.chat.id, L3_FOLLOWUP_FILE_ID)
-            else:
-                await bot.send_video(cb.message.chat.id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
-        except Exception:
-            txt = (L3_FOLLOWUP_CAPTION + "\n" if L3_FOLLOWUP_CAPTION else "") + L3_FOLLOWUP_FILE_ID
-            await bot.send_message(cb.message.chat.id, txt)
-
-        async def delayed_blocks(chat_id: int):
-            await asyncio.sleep(60)
-            await send_block(chat_id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
-            await asyncio.sleep(60)
-            await send_block(chat_id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
-
-        asyncio.create_task(delayed_blocks(cb.message.chat.id))
-        asyncio.create_task(send_course_posts(cb.message.chat.id))
 COURSE_POSTS = [
     # Пост 1
     """Многие новички которые только заходят в сферу Р2Р думают, что нужно обладать каким-то особым навыком или везением. 
@@ -599,6 +499,106 @@ P2P дало мне уверенность, что у меня всегда бу
 
 А сейчас я даю тебе ссылку на мини-курс, который подготовил специально для тебя 👇"""
     ]
+# ========= ДОСТУП/НАПОМИНАНИЯ =========
+ACCESS_NUDGE_TEXTS = [
+    "Вижу, ты ещё не забрал доступ к урокам. Нажми ниже — начнём с первого 👇",
+    "Напомню про интенсив: 3 бесплатных урока ждут тебя. Забери доступ 👇",
+    "Давай не откладывать — забирай доступ и стартуем прямо сейчас 👇",
+]
+
+async def access_nurture(user_id: int):
+    """Спам до нажатия «ПОЛУЧИТЬ ДОСТУП». Запускать после /start."""
+    for i, delay in enumerate(ACCESS_REM_DELAYS):
+        await asyncio.sleep(delay)
+        if get_stage(user_id) >= 1:
+            break
+        txt = ACCESS_NUDGE_TEXTS[min(i, len(ACCESS_NUDGE_TEXTS) - 1)]
+        try:
+            await bot.send_message(user_id, txt, reply_markup=kb_access())
+        except TelegramForbiddenError:
+            break
+        except Exception as e:
+            logging.warning("PM access nudge failed: %s", e)
+            break
+
+async def remind_if_not_opened(user_id: int, stage_expected: int, delay: int):
+    """Напоминаем открыть урок stage_expected, если через delay он не открыт."""
+    await asyncio.sleep(delay)
+    if get_stage(user_id) < stage_expected:
+        texts = {
+            1: "Вижу, ты ещё не открыл *первый бесплатный урок*. Забирай его сейчас 👇",
+            2: "Напомню: *урок 2* всё ещё ждёт тебя.👇",
+            3: "Остался *урок 3*. Давай доведём до результата 💸👇",
+        }
+        try:
+            await bot.send_message(user_id, texts[stage_expected], reply_markup=kb_open(stage_expected))
+        except Exception as e:
+            logging.warning("PM reminder failed: %s", e)
+
+# ========= HANDLERS =========
+
+@router.message(Command("start"))
+async def on_start(m: Message):
+    set_stage(m.from_user.id, 0)
+    # Отправляем первый блок без кнопки
+    await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG)
+    # Отправляем новый блок с описанием урока и кнопкой
+    await send_block(m.chat.id, BANNER_AFTER4, LESSON1_INTRO, reply_markup=kb_access())
+
+async def _approve_later(chat_id: int, user_id: int):
+    try:
+        await bot.approve_chat_join_request(chat_id, user_id)
+    except Exception as e:
+        logging.warning("Approve later failed: %s", e)
+
+@router.callback_query(F.data.startswith("open:"))
+async def on_open(cb: CallbackQuery):
+    await cb.answer()
+    await cb.message.edit_reply_markup(reply_markup=None)
+
+    try:
+        n = int(cb.data.split(":")[1])
+    except Exception:
+        return
+
+    uid = cb.from_user.id
+
+    if n == 3 and DIARY_TG_CHAT_ID:
+        if not has_diary_request(uid):
+            await send_block(cb.message.chat.id, BANNER_AFTER5, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
+            return
+
+    URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
+    await send_url_only(cb.message.chat.id, URLS[n])
+
+    stage = get_stage(uid)
+    if n > stage:
+        set_stage(uid, n)
+
+    # Урок 1 и 2 → автопереход
+    if n in (1, 2):
+        asyncio.create_task(auto_send_next_lesson(uid, n))
+
+    # Урок 3 → видео, блоки и рассылка постов
+    if n == 3:
+        try:
+            if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
+                await bot.send_video_note(cb.message.chat.id, L3_FOLLOWUP_FILE_ID)
+            else:
+                await bot.send_video(cb.message.chat.id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
+        except Exception:
+            txt = (L3_FOLLOWUP_CAPTION + "\n" if L3_FOLLOWUP_CAPTION else "") + L3_FOLLOWUP_FILE_ID
+            await bot.send_message(cb.message.chat.id, txt)
+
+        async def delayed_blocks(chat_id: int):
+            await asyncio.sleep(60)
+            await send_block(chat_id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
+            await asyncio.sleep(60)
+            await send_block(chat_id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
+
+        asyncio.create_task(delayed_blocks(cb.message.chat.id))
+        asyncio.create_task(send_course_posts(cb.message.chat.id))
+
  # === Рассылка 8 постов по 1 каждые 5 часов ===
 def kb_course() -> InlineKeyboardMarkup:
             kb = InlineKeyboardBuilder()
@@ -838,6 +838,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
