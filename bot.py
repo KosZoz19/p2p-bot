@@ -434,12 +434,34 @@ async def on_open(cb: CallbackQuery):
     if n > stage:
         set_stage(uid, n)
 
-    # 5) Для урока 3 сразу финальные блоки (после ссылки)
+       # 5) Для урока 3 сразу финальные блоки (после ссылки)
     if n == 3:
-        asyncio.create_task(_send_l3_video_later(cb.message.chat.id))
-        await send_block(cb.message.chat.id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
-        await send_block(cb.message.chat.id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
-        asyncio.create_task(_send_l3_video_later(cb.message.chat.id))
+        # Сначала отправляем видео Стаса (без задержки)
+        try:
+            if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
+                await bot.send_video_note(cb.message.chat.id, L3_FOLLOWUP_FILE_ID)
+            else:
+                await bot.send_video(
+                    cb.message.chat.id,
+                    L3_FOLLOWUP_FILE_ID,
+                    caption=(L3_FOLLOWUP_CAPTION or None)
+                )
+        except Exception as e:
+            txt = (L3_FOLLOWUP_CAPTION + "\n" if L3_FOLLOWUP_CAPTION else "") + L3_FOLLOWUP_FILE_ID
+            await bot.send_message(cb.message.chat.id, txt, disable_web_page_preview=False, parse_mode=None)
+
+        # Через 1 минуту кидаем BLOCK_6
+        async def delayed_blocks(chat_id: int):
+            try:
+                await asyncio.sleep(60)
+                await send_block(chat_id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
+                await asyncio.sleep(60)
+                await send_block(chat_id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
+            except Exception as e:
+                logging.warning("Delayed blocks failed: %s", e)
+
+        asyncio.create_task(delayed_blocks(cb.message.chat.id))
+       
     
     # 6) Запускаем автоматическую отправку следующего урока через 30 минут
     if n in (1, 2):
@@ -668,3 +690,4 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
