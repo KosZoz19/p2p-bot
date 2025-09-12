@@ -600,7 +600,7 @@ P2P дало мне уверенность, что у меня всегда бу
 А сейчас я даю тебе ссылку на мини-курс, который подготовил специально для тебя 👇"""
     ]
  # === Рассылка 8 постов по 1 каждые 5 часов ===
- def kb_course() -> InlineKeyboardMarkup:
+def kb_course() -> InlineKeyboardMarkup:
             kb = InlineKeyboardBuilder()
             kb.row(InlineKeyboardButton(text="🔥 Мини курс Р2Р", url=SITE_URL))
             return kb.as_markup()
@@ -838,6 +838,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
