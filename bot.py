@@ -512,15 +512,15 @@ def kb_course() -> InlineKeyboardMarkup:
             return kb.as_markup()
 
 async def send_course_posts(chat_id: int):
-    logging.info("Запустилась send_course_posts для %s", chat_id)
-    for i, text in enumerate(COURSE_POSTS, start=1):
-        try:
-            logging.info("Отправляем пост %s", i)
-            await bot.send_message(chat_id, text, reply_markup=kb_course())
-        except Exception as e:
-            logging.warning("Failed to send course post %s: %s", i, e)
-        if i < len(COURSE_POSTS):
-            await asyncio.sleep(1)  # пока тест, вместо 5 часов
+    while True:  # бесконечный цикл
+        for i, text in enumerate(COURSE_POSTS, start=1):
+            try:
+                logging.info("Отправляем пост %s", i)
+                await bot.send_message(chat_id, text, reply_markup=kb_course())
+            except Exception as e:
+                logging.warning("Failed to send course post %s: %s", i, e)
+            if i < len(COURSE_POSTS):
+                await asyncio.sleep(10)  # 5 часов между постами
 
 async def access_nurture(user_id: int):
     """Спам до нажатия «ПОЛУЧИТЬ ДОСТУП». Запускать после /start."""
@@ -838,6 +838,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
