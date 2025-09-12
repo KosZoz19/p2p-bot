@@ -403,9 +403,8 @@ async def _approve_later(chat_id: int, user_id: int):
 @router.callback_query(F.data.startswith("open:"))
 async def on_open(cb: CallbackQuery):
     await cb.answer()
-    # Убираем кнопки после нажатия
     await cb.message.edit_reply_markup(reply_markup=None)
-    
+
     try:
         n = int(cb.data.split(":")[1])
     except Exception:
@@ -413,55 +412,41 @@ async def on_open(cb: CallbackQuery):
 
     uid = cb.from_user.id
 
-    # Убираем проверки просмотра - уроки доступны по порядку автоматически
-
-    # 2) Гейт на подписку перед Уроком 3 (только если настроен телеграм-канал дневника)
     if n == 3 and DIARY_TG_CHAT_ID:
         if not has_diary_request(uid):
             await send_block(cb.message.chat.id, BANNER_AFTER5, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
             return
 
-    # 3) Отдаём ТОЛЬКО ссылку без кнопок
     URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
-    await send_url_only(
-        cb.message.chat.id,
-        URLS[n],
-        reply_markup=None
-    )
+    await send_url_only(cb.message.chat.id, URLS[n])
 
-    # 4) Обновляем стадию
     stage = get_stage(uid)
     if n > stage:
         set_stage(uid, n)
 
-       # 5) Для урока 3 сразу финальные блоки (после ссылки)
+    # Урок 1 и 2 → автопереход
+    if n in (1, 2):
+        asyncio.create_task(auto_send_next_lesson(uid, n))
+
+    # Урок 3 → видео, блоки и рассылка постов
     if n == 3:
-           # Сначала отправляем видео Стаса
         try:
             if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
                 await bot.send_video_note(cb.message.chat.id, L3_FOLLOWUP_FILE_ID)
             else:
-                await bot.send_video(
-                    cb.message.chat.id,
-                    L3_FOLLOWUP_FILE_ID,
-                    caption=(L3_FOLLOWUP_CAPTION or None)
-                )
-        except Exception as e:
+                await bot.send_video(cb.message.chat.id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
+        except Exception:
             txt = (L3_FOLLOWUP_CAPTION + "\n" if L3_FOLLOWUP_CAPTION else "") + L3_FOLLOWUP_FILE_ID
-            await bot.send_message(cb.message.chat.id, txt, disable_web_page_preview=False, parse_mode=None)
+            await bot.send_message(cb.message.chat.id, txt)
 
-        # Через 1 минуту кидаем BLOCK_6 и BLOCK_7
         async def delayed_blocks(chat_id: int):
-            try:
-                await asyncio.sleep(60)
-                await send_block(chat_id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
-                await asyncio.sleep(60)
-                await send_block(chat_id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
-            except Exception as e:
-                logging.warning("Delayed blocks failed: %s", e)
+            await asyncio.sleep(60)
+            await send_block(chat_id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
+            await asyncio.sleep(60)
+            await send_block(chat_id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
 
         asyncio.create_task(delayed_blocks(cb.message.chat.id))
-       
+        asyncio.create_task(send_course_posts(cb.message.chat.id))
         COURSE_POSTS = [
     # Пост 1
     """Многие новички которые только заходят в сферу Р2Р думают, что нужно обладать каким-то особым навыком или везением. 
@@ -629,7 +614,6 @@ P2P дало мне уверенность, что у меня всегда бу
                 if i < len(COURSE_POSTS):
                     await asyncio.sleep(30* 0.1)  # 5 часов
 
-        asyncio.create_task(send_course_posts(cb.message.chat.id))
 
 # Обработчик "done:" убран - теперь автоматическая отправка через 30 минут
 
@@ -854,6 +838,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
