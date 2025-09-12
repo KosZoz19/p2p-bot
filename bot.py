@@ -520,7 +520,7 @@ async def send_course_posts(chat_id: int):
             except Exception as e:
                 logging.warning("Failed to send course post %s: %s", i, e)
             if i < len(COURSE_POSTS):
-                await asyncio.sleep(10)  # 5 часов между постами
+                await asyncio.sleep(60*60*5)  # 5 часов между постами
 
 async def access_nurture(user_id: int):
     """Спам до нажатия «ПОЛУЧИТЬ ДОСТУП». Запускать после /start."""
@@ -838,6 +838,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
