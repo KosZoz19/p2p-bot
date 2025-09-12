@@ -435,7 +435,7 @@ async def on_open(cb: CallbackQuery):
         set_stage(uid, n)
 
        # 5) Для урока 3 сразу финальные блоки (после ссылки)
-   if n == 3:
+    if n == 3:
            # Сначала отправляем видео Стаса
         try:
             if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
@@ -909,6 +909,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
