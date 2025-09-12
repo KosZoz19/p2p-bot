@@ -475,7 +475,7 @@ async def on_open(cb: CallbackQuery):
                 except Exception as e:
                     logging.warning("Failed to send course post %s: %s", i, e)
                 if i < len(COURSE_POSTS):
-                    await asyncio.sleep(5 * 60 * 60)  # 5 часов
+                    await asyncio.sleep(30* 0.1)  # 5 часов
 
         asyncio.create_task(send_course_posts(cb.message.chat.id))
        
@@ -855,6 +855,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
