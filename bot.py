@@ -558,7 +558,7 @@ async def on_start(m: Message):
     await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG)
     # Отправляем новый блок с описанием урока и кнопкой
     await send_block(m.chat.id, BANNER_AFTER4, LESSON1_INTRO, reply_markup=kb_access())
-       asyncio.create_task(send_course_posts(m.chat.id))
+    asyncio.create_task(send_course_posts(m.chat.id))
 
 async def _approve_later(chat_id: int, user_id: int):
     try:
@@ -836,6 +836,7 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
 
 
