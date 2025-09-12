@@ -439,7 +439,7 @@ async def on_open(cb: CallbackQuery):
         # Сначала отправляем видео Стаса (без задержки)
         try:
             if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
-                await bot.send_video_note(cb.message.chat.id, L3_FOLLOWUP_FILE_ID)
+                 asyncio.create_task(_send_l3_video_later(cb.message.chat.id))
             else:
                 await bot.send_video(
                     cb.message.chat.id,
@@ -690,4 +690,5 @@ if __name__ == "__main__":
         asyncio.run(run_polling())
     else:
         asyncio.run(run_webhook())
+
 
