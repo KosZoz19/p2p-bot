@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import logging
+import random
 from pathlib import Path
 from time import time
 from typing import Dict, Any
@@ -512,7 +513,7 @@ def kb_course() -> InlineKeyboardMarkup:
             return kb.as_markup()
 
 async def send_course_posts(chat_id: int):
-    await asyncio.sleep(5 * 60 * 60)
+    await asyncio.sleep(60*60*5)
     while True:  # бесконечный цикл
         for i, text in enumerate(COURSE_POSTS, start=1):
             try:
@@ -557,17 +558,29 @@ async def remind_if_not_opened(user_id: int, stage_expected: int, delay: int):
 @router.message(Command("start"))
 async def on_start(m: Message):
     set_stage(m.from_user.id, 0)
+
+    if L3_FOLLOWUP_FILE_ID:
+        async def _send_now(chat_id: int):
+            try:
+                # Если у вас есть хелпер для видеозаметок — используем его, иначе отправляем как видео
+                if "_looks_like_videonote" in globals() and _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
+                    await bot.send_video_note(chat_id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
+                else:
+                    await bot.send_video(chat_id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
+            except Exception:
+                # Фолбек: отправляем как текст (caption + file_id)
+                try:
+                    await bot.send_message(chat_id, (L3_FOLLOWUP_CAPTION or "") + "\n" + L3_FOLLOWUP_FILE_ID)
+                except Exception:
+                    pass
+
+        asyncio.create_task(_send_now(m.chat.id))
+
     # Отправляем первый блок без кнопки
     await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG)
     # Отправляем новый блок с описанием урока и кнопкой
     await send_block(m.chat.id, BANNER_AFTER4, LESSON1_INTRO, reply_markup=kb_access())
     asyncio.create_task(send_course_posts(m.chat.id))
-
-async def _approve_later(chat_id: int, user_id: int):
-    try:
-        await bot.approve_chat_join_request(chat_id, user_id)
-    except Exception as e:
-        logging.warning("Approve later failed: %s", e)
 
 @router.callback_query(F.data.startswith("open:"))
 async def on_open(cb: CallbackQuery):
@@ -827,7 +840,7 @@ async def run_webhook():
     logging.info("Webhook server started on 0.0.0.0:%s", PORT)
     # Keep the server running
     try:
-        await asyncio.Future()  # run forever
+        await  foreverasyncio.Future()  # run
     except KeyboardInterrupt:
         pass
     finally:
