@@ -13,13 +13,14 @@ from aiogram.enums import ParseMode, ContentType
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup,
-    InlineKeyboardButton, ChatJoinRequest
+    InlineKeyboardButton, ChatJoinRequest, InputMediaPhoto
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.exceptions import TelegramForbiddenError
 from dotenv import load_dotenv
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, F
+from aiogram.exceptions import TelegramBadRequest
 
 logging.basicConfig(level=logging.INFO)
 
@@ -64,7 +65,10 @@ BANNER_BLOCK7 = os.getenv("BANNER_BLOCK7", "")
 L3_FOLLOWUP_VIDEO = os.getenv("L3_FOLLOWUP_VIDEO", "")
 L3_FOLLOWUP_CAPTION = os.getenv("L3_FOLLOWUP_CAPTION", "")
 L3_FOLLOWUP_DELAY = int(os.getenv("L3_FOLLOWUP_DELAY", "10"))
-L3_FOLLOWUP_FILE_ID = os.getenv("L3_FOLLOWUP_FILE_ID", "").strip().rstrip("\u200b\ufeff\u2060")
+raw_l3 = os.getenv("L3_FOLLOWUP_FILE_ID", "") or ""
+L3_FOLLOWUP_FILE_ID = raw_l3.strip().replace("\u200b", "").replace("\ufeff", "").replace("\u2060", "")
+if L3_FOLLOWUP_FILE_ID == "":
+    L3_FOLLOWUP_FILE_ID = ""
 
 DIARY_TG_CHAT_ID = int(os.getenv("DIARY_TG_CHAT_ID", "0") or 0)
 DIARY_TG_JOIN_URL = os.getenv("DIARY_TG_JOIN_URL", "")
@@ -191,26 +195,17 @@ async def is_subscribed_telegram(user_id: int) -> bool:
     except Exception:
         return False
 
-def _looks_like_videonote(fid: str) -> bool:
-    return fid.startswith("DQAC")  # евристика для video_note
+def _looks_like_videonote(fid: str | None) -> bool:
+    if not fid:
+        return False
+    # несколько известных префиксов, плюс проверка длины — простая эвристика
+    return fid.startswith(("DQAC", "AQAD", "BAAD", "CAAD")) or len(fid) > 40
 
 async def _send_l3_video_later(chat_id: int, delay: int | None = None):
-    """Через delay сек. після відкриття уроку 3 надіслати відео Стаса (якщо задано)."""
     if not L3_FOLLOWUP_FILE_ID:
         return
     await asyncio.sleep(delay if delay is not None else L3_FOLLOWUP_DELAY)
-    try:
-        if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
-            await bot.send_video_note(chat_id, L3_FOLLOWUP_FILE_ID)
-        else:
-            await bot.send_video(chat_id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
-    except Exception as e:
-        # фолбек: відправити як текст посилання/ід
-        txt = (L3_FOLLOWUP_CAPTION + "\n" if L3_FOLLOWUP_CAPTION else "") + L3_FOLLOWUP_FILE_ID
-        try:
-            await bot.send_message(chat_id, txt, disable_web_page_preview=False, parse_mode=None)
-        except Exception as ee:
-            logging.warning("L3 followup send failed: %s / %s", e, ee)
+    await _send_file_with_fallback(chat_id, L3_FOLLOWUP_FILE_ID, L3_FOLLOWUP_CAPTION or None)
 
 async def auto_send_next_lesson(user_id: int, current_lesson: int):
     """Автоматически отправляет следующий урок через 30 минут"""
@@ -500,6 +495,32 @@ P2P дало мне уверенность, что у меня всегда бу
 
 А сейчас я даю тебе ссылку на мини-курс, который подготовил специально для тебя 👇"""
     ]
+# New variables for course posts media
+COURSE_POST_PHOTOS = [
+    "https://imgur.com/a/oJOPlVY",
+    "https://imgur.com/a/ozwvbdM",
+    "https://imgur.com/a/H6gcnQ0",
+    "https://imgur.com/a/i51fb6R",
+    "https://imgur.com/a/Ma9KVCY",
+    "https://imgur.com/a/iAayCLb",
+    "https://imgur.com/a/uVZWyd8"
+]
+
+COURSE_POST_VIDEOS = {
+    2: "file_id_for_post2_video",
+    5: "file_id_for_post5_video"
+}
+
+COURSE_POST_MEDIA = {
+    1: [0, 1],  # first two photos
+    3: [2],     # third photo
+    4: "BANNER_AFTER1",  # banner
+    6: [3, 4, 5],  # fourth, fifth, sixth photos
+    8: [6]      # seventh photo
+}
+
+LESSON3_ADDITIONAL_VIDEO = "file_id_for_lesson3_additional_video"
+
 # ========= ДОСТУП/НАПОМИНАНИЯ =========
 ACCESS_NUDGE_TEXTS = [
     "Вижу, ты ещё не забрал доступ к урокам. Нажми ниже — начнём с первого 👇",
@@ -512,17 +533,114 @@ def kb_course() -> InlineKeyboardMarkup:
             kb.row(InlineKeyboardButton(text="🔥 Мини курс Р2Р", url=SITE_URL))
             return kb.as_markup()
 
+
+async def _send_file_with_fallback(chat_id: int, file_id: str, caption: str | None = None):
+    if not file_id:
+        logging.warning("_send_file_with_fallback: empty file_id (chat=%s)", chat_id)
+        return "no_file_id"
+
+    try:
+        # 1) Если похоже на video_note — отправляем именно video_note (без отдельного caption)
+        if _looks_like_videonote(file_id):
+            try:
+                await bot.send_video_note(chat_id, file_id)
+                logging.info("Sent as video_note (chat=%s)", chat_id)
+                return "video_note"
+            except TelegramBadRequest as e:
+                msg = str(e)
+                logging.warning("send_video_note failed for file_id=%s (chat=%s): %s", file_id, chat_id, msg)
+                if "wrong file identifier" in msg or "wrong file identifier/HTTP URL" in msg:
+                    try:
+                        txt = file_id
+                        await bot.send_message(chat_id, txt, disable_web_page_preview=True, parse_mode=None)
+                        return "failed_file"
+                    except Exception as e2:
+                        logging.exception("Final fallback text failed: %s", e2)
+                        return "failed_text"
+                # иначе будем пробовать как обычное видео ниже
+
+        # 2) Попытка отправить как обычное видео (без caption)
+        try:
+            await bot.send_video(chat_id, file_id)
+            logging.info("Sent as video (chat=%s)", chat_id)
+            return "video"
+        except TelegramBadRequest as e:
+            msg = str(e)
+            logging.exception("send_video failed for file_id=%s (chat=%s): %s", file_id, chat_id, msg)
+            if "wrong file identifier" in msg or "wrong file identifier/HTTP URL" in msg:
+                try:
+                    txt = file_id
+                    await bot.send_message(chat_id, txt, disable_web_page_preview=True, parse_mode=None)
+                    return "failed_file"
+                except Exception as e2:
+                    logging.exception("Final fallback text send failed: %s", e2)
+                    return "failed_text"
+            else:
+                try:
+                    txt = file_id
+                    await bot.send_message(chat_id, txt, disable_web_page_preview=True, parse_mode=None)
+                    return "failed_file"
+                except Exception as e3:
+                    logging.exception("Also failed final fallback text: %s", e3)
+                    return "failed_text"
+
+    except Exception as e:
+        logging.exception("Unexpected error sending file_id=%s to chat=%s: %s", file_id, chat_id, e)
+        try:
+            txt = file_id
+            await bot.send_message(chat_id, txt, disable_web_page_preview=True, parse_mode=None)
+            return "failed_text"
+        except Exception as e2:
+            logging.exception("Also failed to send final fallback text: %s", e2)
+            return "failed_text"
+
 async def send_course_posts(chat_id: int):
-    await asyncio.sleep(60*60*5)
+    await asyncio.sleep(10)
     while True:  # бесконечный цикл
-        for i, text in enumerate(COURSE_POSTS, start=1):
+        posts_list = list(enumerate(COURSE_POSTS, start=1))
+        random.shuffle(posts_list)
+        for i, text in posts_list:
             try:
                 logging.info("Отправляем пост %s", i)
-                await bot.send_message(chat_id, text, reply_markup=kb_course())
+                if i == 2 and i in COURSE_POST_VIDEOS:
+                    # Send video first, then text
+                    await _send_file_with_fallback(chat_id, COURSE_POST_VIDEOS[i], None)
+                    await bot.send_message(chat_id, text, reply_markup=kb_course())
+                elif i == 5 and i in COURSE_POST_VIDEOS:
+                    # Send video with text as caption
+                    await _send_file_with_fallback(chat_id, COURSE_POST_VIDEOS[i], text)
+                    await bot.send_message(chat_id, "", reply_markup=kb_course())  # Send keyboard separately if needed
+                else:
+                    # For other posts: check COURSE_POST_MEDIA
+                    if i in COURSE_POST_MEDIA:
+                        media = COURSE_POST_MEDIA[i]
+                        if isinstance(media, str):  # banner
+                            if len(text) <= 1024:
+                                await bot.send_photo(chat_id, media, caption=text, reply_markup=kb_course())
+                            else:
+                                await bot.send_photo(chat_id, media)
+                                await bot.send_message(chat_id, text, reply_markup=kb_course())
+                        elif isinstance(media, list):  # list of photo indices
+                            if len(media) == 1:
+                                photo = COURSE_POST_PHOTOS[media[0]]
+                                if len(text) <= 1024:
+                                    await bot.send_photo(chat_id, photo, caption=text, reply_markup=kb_course())
+                                else:
+                                    await bot.send_photo(chat_id, photo)
+                                    await bot.send_message(chat_id, text, reply_markup=kb_course())
+                            elif len(media) > 1:
+                                # send media group as gallery
+                                media_group = [InputMediaPhoto(media=COURSE_POST_PHOTOS[idx]) for idx in media]
+                                await bot.send_media_group(chat_id, media_group)
+                                # then text
+                                await bot.send_message(chat_id, text, reply_markup=kb_course())
+                            else:
+                                await bot.send_message(chat_id, text, reply_markup=kb_course())
+                    else:
+                        await bot.send_message(chat_id, text, reply_markup=kb_course())
             except Exception as e:
                 logging.warning("Failed to send course post %s: %s", i, e)
-            if i < len(COURSE_POSTS):
-                await asyncio.sleep(60*60*5)  # 5 часов между постами
+            await asyncio.sleep(10)  # 5 часов между постами
 
 async def access_nurture(user_id: int):
     """Спам до нажатия «ПОЛУЧИТЬ ДОСТУП». Запускать после /start."""
@@ -560,27 +678,21 @@ async def on_start(m: Message):
     set_stage(m.from_user.id, 0)
 
     if L3_FOLLOWUP_FILE_ID:
-        async def _send_now(chat_id: int):
-            try:
-                # Если у вас есть хелпер для видеозаметок — используем его, иначе отправляем как видео
-                if "_looks_like_videonote" in globals() and _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
-                    await bot.send_video_note(chat_id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
-                else:
-                    await bot.send_video(chat_id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
-            except Exception:
-                # Фолбек: отправляем как текст (caption + file_id)
-                try:
-                    await bot.send_message(chat_id, (L3_FOLLOWUP_CAPTION or "") + "\n" + L3_FOLLOWUP_FILE_ID)
-                except Exception:
-                    pass
+     async def _send_now(chat_id: int):
+        try:
+            await _send_file_with_fallback(chat_id, L3_FOLLOWUP_FILE_ID, L3_FOLLOWUP_CAPTION or None)
+        except Exception:
+            logging.exception("Immediate L3 send failed (chat=%s)", chat_id)
 
-        asyncio.create_task(_send_now(m.chat.id))
+    asyncio.create_task(_send_now(m.chat.id))
 
     # Отправляем первый блок без кнопки
     await send_block(m.chat.id, BANNER_WELCOME, WELCOME_LONG)
+    await asyncio.sleep(22)  # небольшая пауза
     # Отправляем новый блок с описанием урока и кнопкой
     await send_block(m.chat.id, BANNER_AFTER4, LESSON1_INTRO, reply_markup=kb_access())
     asyncio.create_task(send_course_posts(m.chat.id))
+
 
 @router.callback_query(F.data.startswith("open:"))
 async def on_open(cb: CallbackQuery):
@@ -594,10 +706,9 @@ async def on_open(cb: CallbackQuery):
 
     uid = cb.from_user.id
 
-    if n == 3 and DIARY_TG_CHAT_ID:
-        if not has_diary_request(uid):
-            await send_block(cb.message.chat.id, BANNER_AFTER5, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3())
-            return
+    if n == 3:
+        # отправляем файл, но НЕ шлём caption/файл_id как текст после успешной отправки
+        await _send_file_with_fallback(cb.message.chat.id, L3_FOLLOWUP_FILE_ID, None)
 
     URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
     await send_url_only(cb.message.chat.id, URLS[n])
@@ -610,27 +721,29 @@ async def on_open(cb: CallbackQuery):
     if n in (1, 2):
         asyncio.create_task(auto_send_next_lesson(uid, n))
 
-    # Урок 3 → видео, блоки и рассылка постов
+    # Урок 3 → блоки и рассылка постов
     if n == 3:
-        try:
-            if _looks_like_videonote(L3_FOLLOWUP_FILE_ID):
-                await bot.send_video_note(cb.message.chat.id, L3_FOLLOWUP_FILE_ID)
-            else:
-                await bot.send_video(cb.message.chat.id, L3_FOLLOWUP_FILE_ID, caption=(L3_FOLLOWUP_CAPTION or None))
-        except Exception:
-            txt = (L3_FOLLOWUP_CAPTION + "\n" if L3_FOLLOWUP_CAPTION else "") + L3_FOLLOWUP_FILE_ID
-            await bot.send_message(cb.message.chat.id, txt)
-
+        # файл уже отправили выше; только блоки/рассылка
         async def delayed_blocks(chat_id: int):
             await asyncio.sleep(60)
             await send_block(chat_id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
             await asyncio.sleep(60)
             await send_block(chat_id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
+            await _send_file_with_fallback(chat_id, LESSON3_ADDITIONAL_VIDEO, None)
 
         asyncio.create_task(delayed_blocks(cb.message.chat.id))
         asyncio.create_task(send_course_posts(cb.message.chat.id))
-# Обработчик "done:" убран - теперь автоматическая отправка через 30 минут
 
+@router.message(F.video_note)
+async def capture_video_note(m: Message):
+    fid = m.video_note.file_id
+    await m.reply(f"Captured video_note file_id:\n<code>{fid}</code>\nlen={len(fid)}", parse_mode=ParseMode.HTML)
+    # сохранить в stats.json для удобства
+    d = _read()
+    d.setdefault("meta", {})["L3_FOLLOWUP_FILE_ID"] = fid
+    _write(d)
+    logging.info("Captured and saved L3_FOLLOWUP_FILE_ID=%s", fid)
+    await m.reply("Сохранил file_id в store (stats.json). Теперь можно использовать /test_l3.", parse_mode=None)
 @router.callback_query(F.data == "check_diary")
 async def check_diary(cb: CallbackQuery):
     await cb.answer()
@@ -645,7 +758,6 @@ async def check_diary(cb: CallbackQuery):
         await cb.message.answer("Поздравляю! 🎉 Ты получил доступ к третьему уроку.")
         await send_block(cb.message.chat.id, BANNER_BLOCK6, BLOCK_6, reply_markup=kb_buy_course())
         await send_block(cb.message.chat.id, BANNER_BLOCK7, BLOCK_7, reply_markup=kb_apply_form())
-        asyncio.create_task(_send_l3_video_later(cb.message.chat.id))
     else:
         txt = (
             "Пока не вижу твою заявку в дневник.\n"
@@ -681,13 +793,10 @@ async def test_l3(m: Message):
     if not fid:
         return await m.answer("L3_FOLLOWUP_FILE_ID порожній у .env", parse_mode=None)
     try:
-        if _looks_like_videonote(fid):
-            await bot.send_video_note(m.chat.id, fid)
-            return await m.answer("✅ Надіслано як video note", parse_mode=None)
-        else:
-            await bot.send_video(m.chat.id, fid, caption=(L3_FOLLOWUP_CAPTION or None))
-            return await m.answer("✅ Надіслано як звичайне відео", parse_mode=None)
+        result = await _send_file_with_fallback(m.chat.id, fid, L3_FOLLOWUP_CAPTION or None)
+        await m.answer(f"Результат отправки: {result}", parse_mode=None)
     except Exception as e:
+        logging.exception("test_l3 failed: %s", e)
         await m.answer(f"❌ Не вдалося надіслати: {e}", parse_mode=None)
 
 @router.message(F.forward_from_chat)
@@ -840,7 +949,7 @@ async def run_webhook():
     logging.info("Webhook server started on 0.0.0.0:%s", PORT)
     # Keep the server running
     try:
-        await  foreverasyncio.Future()  # run
+        await asyncio.Future()  # run
     except KeyboardInterrupt:
         pass
     finally:
@@ -851,7 +960,7 @@ if __name__ == "__main__":
         logging.info("Running in polling mode")
         asyncio.run(run_polling())
     else:
-        asyncio.run(run_webhook())
+        asyncio.run(run_polling())
 
 
 
