@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from time import time
 from typing import Dict, Any
-from aiogram.types import Update
+from aiogram.types import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.enums.chat_member_status import ChatMemberStatus
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ContentType
@@ -14,7 +14,7 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup,
     InlineKeyboardButton, ChatJoinRequest, FSInputFile
 )
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest, TelegramEntityTooLarge
 from dotenv import load_dotenv
 from aiohttp import web
@@ -272,6 +272,12 @@ def kb_access() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="🔑 ПОЛУЧИТЬ ДОСТУП", callback_data="open:1"))
     return kb.as_markup()
+
+def kb_access_reply() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardBuilder()
+    kb.add(KeyboardButton(text="🔑 ПОЛУЧИТЬ ДОСТУП"))
+    kb.adjust(1)
+    return kb.as_markup(resize_keyboard=True)
 
 def kb_open(n: int) -> InlineKeyboardMarkup:
     labels = {1: "ОТКРЫТЬ УРОК 1", 2: "ОТКРЫТЬ УРОК 2", 3: "ОТКРЫТЬ УРОК 3"}
@@ -575,12 +581,27 @@ async def start_welcome_sequence(chat_id: int):
     await send_block(chat_id, BANNER_WELCOME, WELCOME_LONG)
     await asyncio.sleep(22)  # небольшая пауза
     # Отправляем новый блок с описанием урока и кнопкой
-    await send_block(chat_id, BANNER_AFTER4, LESSON1_INTRO, reply_markup=kb_access())
+    await send_block(chat_id, BANNER_AFTER4, LESSON1_INTRO, reply_markup=kb_access_reply())  #kb_access())
     asyncio.create_task(send_course_posts(chat_id))
 
 @router.message(Command("start"))
 async def on_start(m: Message):
     await start_welcome_sequence(m.from_user.id)
+
+
+@router.message(F.text == "🔑 ПОЛУЧИТЬ ДОСТУП")
+async def on_get_access(m: Message):
+    uid = m.from_user.id
+    stage = get_stage(uid)
+    if stage >= 1:
+        return await m.reply("Ты уже получил доступ к урокам. Жми на кнопки ниже, чтобы открыть нужный урок.", reply_markup=kb_open(stage))
+    await m.reply("Отлично! Сейчас открою тебе доступ к первому уроку 👇", reply_markup=ReplyKeyboardRemove())
+    await asyncio.sleep(2)
+    await send_block(uid, BANNER_AFTER1, teaser_text(1), reply_markup=kb_open(1))
+    set_stage(uid, 1)
+    asyncio.create_task(auto_send_next_lesson(uid, 1))
+    asyncio.create_task(remind_if_not_opened(uid, 1, REM1_DELAY))
+    asyncio.create_task(access_nurture(uid))
 
 
 @router.callback_query(F.data == "buy_course")
@@ -672,7 +693,7 @@ async def on_join_request(req: ChatJoinRequest):
         return
 
     # For all other channels, approve and try to start the full welcome sequence.
-    await req.approve()
+    # await req.approve()
     logging.info(f"Approved join request for user {uid} in chat {req.chat.id}.")
     try:
         logging.info(f"Attempting to proactively start welcome sequence for user {uid}.")
