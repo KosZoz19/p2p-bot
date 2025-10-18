@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 from time import time
 from typing import Dict, Any
-from aiogram.types import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InputMediaVideo, InputFile
 from aiogram.enums.chat_member_status import ChatMemberStatus
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ContentType
@@ -17,6 +17,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest, TelegramEntityTooLarge
+from aiogram.utils.media_group import MediaGroupBuilder
 from dotenv import load_dotenv
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, F
@@ -97,7 +98,7 @@ MARK_REMIND_DELAY_2 = int(os.getenv("MARK_REMIND_DELAY_2", "300"))
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0") or 0)
 
-bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 async def send_admin_message(text: str):
     """Send a message to the admin if ADMIN_ID is set."""
@@ -502,11 +503,11 @@ P2P дало мне уверенность, что у меня всегда бу
 
 <b>• Люди</b>: Не хочешь начальника? Его не будет. Хочешь команду? Собираешь и управляешь.
 
-<b/>• Умения</b>: Боишься, что не разберёшься? Ко мне на обучение приходят люди, у которых нет даже минимального понятия не то что в Р2Р, а в крипте в целом. После месяца обучения их доход вырастает до 1000$+.
+<b>• Умения</b>: Боишься, что не разберёшься? Ко мне на обучение приходят люди, у которых нет даже минимального понятия не то что в Р2Р, а в крипте в целом. После месяца обучения их доход вырастает до 1000$+.
 
 <i>На видео сверху хороший пример. Один из учеников решил сделать себе мини-отпуск и поехать на отдых за счёт Р2Р. Итог — за отдых он заработал больше, чем потратил.</i>
 
-<blockquote>Р2Р — это инструмент, который в правильных руках даёт полную свободу и независимость. Вопрос, готов ли ты это взять?<blockquote>""",
+<blockquote>Р2Р — это инструмент, который в правильных руках даёт полную свободу и независимость. Вопрос, готов ли ты это взять?</blockquote>""",
 
     # Пост 6
     """<b>А это пример одного из первых учеников, Богдана.</b>
@@ -580,9 +581,21 @@ COURSE_POST_PHOTOS = [
 ]
 
 COURSE_POST_VIDEOS = {
-    2: "videos/post_2.MOV",
-    5: "videos/post_5.MP4",
-    7: "videos/post_7.MOV"
+    2: {
+        "path" :"videos/post_2.MOV",
+        "height": 1280,
+        "width": 720,
+    },
+    5: {
+        "path": "videos/post_5.MP4",
+        "height": 1280,
+        "width": 624,
+    },
+    7: {
+        "path" :"videos/post_7.MOV",
+        "height": 1280,
+        "width": 720,
+    },
 }
 
 COURSE_POST_MEDIA = {
@@ -737,41 +750,55 @@ async def send_course_posts(chat_id: int):
                     reply_markup = kb_course() if post_index == 8 else None
 
                     # Handle different media combinations
-                    if post_index in COURSE_POST_MEDIA and post_index in COURSE_POST_VIDEOS:
-                        # Both photos and video - send photos as media group without caption, then video without caption, then text separately
-                        media_group = []
-                        for photo_index in COURSE_POST_MEDIA[post_index]:
-                            media_group.append(InputMediaPhoto(media=COURSE_POST_PHOTOS[photo_index]))
-                        if media_group:
-                            await bot.send_media_group(chat_id, media_group)
-                        # Send video without caption
-                        video_file = COURSE_POST_VIDEOS[post_index]
-                        await _send_file_with_fallback(chat_id, video_file, None)
-                        # Send full text as separate message
-                        await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                    if post_index in COURSE_POST_MEDIA or post_index in COURSE_POST_VIDEOS:
+                        media_group = MediaGroupBuilder(caption=text if len(text) <= 1024 else None)
+                        if post_index in COURSE_POST_MEDIA:
+                            for photo_index in COURSE_POST_MEDIA[post_index]:
+                                media_group.add_photo(media=COURSE_POST_PHOTOS[photo_index])
+                        if post_index in COURSE_POST_VIDEOS:
+                            video_file = COURSE_POST_VIDEOS[post_index]["path"]
+                            media_group.add_video(media=FSInputFile(video_file),
+                                                  height=COURSE_POST_VIDEOS[post_index]["height"],
+                                                  width=COURSE_POST_VIDEOS[post_index]["width"]
+                                                  )
 
-                    elif post_index in COURSE_POST_MEDIA:
-                        # Only photos - send media without caption, then text separately
-                        photo_indices = COURSE_POST_MEDIA[post_index]
-                        if len(photo_indices) == 1:
-                            # Single photo - send without caption, then text
-                            await bot.send_photo(chat_id, COURSE_POST_PHOTOS[photo_indices[0]], caption=None)
+                        await bot.send_media_group(chat_id, media_group.build())
+                        if len(text) > 1024:
                             await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-                        else:
-                            # Multiple photos - send media group without caption, then text separately
-                            media_group = []
-                            for photo_index in photo_indices:
-                                media_group.append(InputMediaPhoto(media=COURSE_POST_PHOTOS[photo_index]))
-                            if media_group:
-                                await bot.send_media_group(chat_id, media_group)
-                            # Send full text as separate message with parse_mode
-                            await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
-                    elif post_index in COURSE_POST_VIDEOS:
-                        # Only video - send video without caption, then text separately
-                        video_file = COURSE_POST_VIDEOS[post_index]
-                        await _send_file_with_fallback(chat_id, video_file, None)
-                        await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                    #     # Both photos and video - send photos as media group without caption, then video without caption, then text separately
+                    #     media_group = []
+                    #     for photo_index in COURSE_POST_MEDIA[post_index]:
+                    #         # media_group.append(InputMediaPhoto(media=COURSE_POST_PHOTOS[photo_index]))
+                    #     # if media_group:
+                    #     #     await bot.send_media_group(chat_id, media_group)
+                    #     # Send video without caption
+                    #     video_file = COURSE_POST_VIDEOS[post_index]
+                    #     await _send_file_with_fallback(chat_id, video_file, None)
+                    #     # Send full text as separate message
+                    #     await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                    #
+                    # elif post_index in COURSE_POST_MEDIA:
+                    #     # Only photos - send media without caption, then text separately
+                    #     photo_indices = COURSE_POST_MEDIA[post_index]
+                    #     if len(photo_indices) == 1:
+                    #         # Single photo - send without caption, then text
+                    #         await bot.send_photo(chat_id, COURSE_POST_PHOTOS[photo_indices[0]], caption=None)
+                    #         await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                    #     else:
+                    #         # Multiple photos - send media group without caption, then text separately
+                    #         media_group = []
+                    #         for photo_index in photo_indices:
+                    #             media_group.append(InputMediaPhoto(media=COURSE_POST_PHOTOS[photo_index]))
+                    #         if media_group:
+                    #             await bot.send_media_group(chat_id, media_group)
+                    #         # Send full text as separate message with parse_mode
+                    #         await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                    #
+                    # elif post_index in COURSE_POST_VIDEOS:
+                    #     # Only video - send video without caption, then text separately
+                    #     video_file = COURSE_POST_VIDEOS[post_index]
+                    #     await _send_file_with_fallback(chat_id, video_file, None)
+                    #     await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
                     else:
                         # Only text
@@ -809,7 +836,8 @@ async def remind_if_not_opened(user_id: int, stage_expected: int, delay: int):
             3: "Остался *урок 3*. Давай доведём до результата 💸👇",
         }
         try:
-            await bot.send_message(user_id, texts[stage_expected], reply_markup=kb_open(stage_expected))
+            await bot.send_message(user_id, texts[stage_expected], reply_markup=kb_open(stage_expected),
+                                   parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
             logging.warning("PM reminder failed: %s", e)
 
@@ -820,7 +848,8 @@ async def start_welcome_sequence(chat_id: int):
     set_stage(chat_id, 0)
     set_pm_ok(chat_id, True)
     # Отправляем первый блок с кнопкой
-    await send_block(chat_id, BANNER_WELCOME, WELCOME_LONG, reply_markup=kb_access_reply())
+    await send_block(chat_id, BANNER_WELCOME, WELCOME_LONG, reply_markup=kb_access_reply(),
+                     parse_mode=ParseMode.MARKDOWN)
 
 
 @router.message(Command("start"))
@@ -931,21 +960,21 @@ async def check_diary(cb: CallbackQuery):
     # Делаем небольшую паузу, чтобы дать Telegram время обработать подписку
     await asyncio.sleep(3) 
 
-    if await is_subscribed_telegram(uid):
+    # if await is_subscribed_telegram(uid):
         # Убираем кнопки после нажатия
-        await cb.message.edit_reply_markup(reply_markup=None)
-        # Отправляем файл L3_FOLLOWUP_FILE
-        await _send_file_with_fallback(cb.message.chat.id, L3_FOLLOWUP_FILE, None)
-        # Отправляем ссылку на 3 урок
-        URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
-        await send_url_only(cb.message.chat.id, URLS[3])
-    else:
-        txt = (
-            "Пока не вижу твою подписку на дневник.\n"
-            "Нажми «Подписаться на дневник», подпишись, и затем снова жми «ПРОВЕРИТЬ»."
-        )
-        # Не убираем кнопки, если проверка не удалась
-        await cb.message.answer(txt, reply_markup=kb_subscribe_then_l3())
+    await cb.message.edit_reply_markup(reply_markup=None)
+    # Отправляем файл L3_FOLLOWUP_FILE
+    await _send_file_with_fallback(cb.message.chat.id, L3_FOLLOWUP_FILE, None)
+    # Отправляем ссылку на 3 урок
+    URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
+    await send_url_only(cb.message.chat.id, URLS[3])
+    # else:
+    #     txt = (
+    #         "Пока не вижу твою подписку на дневник.\n"
+    #         "Нажми «Подписаться на дневник», подпишись, и затем снова жми «ПРОВЕРИТЬ»."
+    #     )
+    #     # Не убираем кнопки, если проверка не удалась
+    #     await cb.message.answer(txt, reply_markup=kb_subscribe_then_l3())
 
 
 @router.chat_join_request()
