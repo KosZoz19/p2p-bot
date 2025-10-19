@@ -93,7 +93,8 @@ ACCESS_REM_DELAYS = [
     if x.strip().isdigit()
 ]
 
-COURSE_POST_DELAY = int(os.getenv("COURSE_POST_DELAY", "18000"))
+COURSE_POST_DELAY = int(os.getenv("COURSE_POST_DELAY", "1800"))
+ROTATION_DELAY = int(os.getenv("ROTATION_DELAY", "21600"))
 LAST_BOT_MESSAGE_TS: dict[int, float] = {}
 
 MARK_REMIND_DELAY_1 = int(os.getenv("MARK_REMIND_DELAY_1", "300"))
@@ -138,6 +139,16 @@ def set_stage(uid: int, stage: int):
     u = d.setdefault("users", {}).setdefault(str(uid), {})
     u["stage"] = stage
     u["ts"] = int(time())
+    _write(d)
+
+def is_first_rotation_done(uid: int) -> bool:
+    d = _read()
+    return bool(d.get("users", {}).get(str(uid), {}).get("first_rotation_done", False))
+
+def set_first_rotation_done(uid: int, done: bool = True):
+    d = _read()
+    u = d.setdefault("users", {}).setdefault(str(uid), {})
+    u["first_rotation_done"] = bool(done)
     _write(d)
 
 def set_pm_ok(uid: int, ok: bool):
@@ -801,8 +812,9 @@ async def send_course_posts(chat_id: int):
 
     try:
         while True:
-            await _wait_quiet_since_last_bot_message(chat_id, COURSE_POST_DELAY)
             stage = get_stage(chat_id)
+            if stage < 9 or not is_first_rotation_done(chat_id):
+                await _wait_quiet_since_last_bot_message(chat_id, COURSE_POST_DELAY)
 
             if stage < 2:
                 set_stage(chat_id, 2)
@@ -858,9 +870,10 @@ async def send_course_posts(chat_id: int):
 
             post_indices = [i for i in range(len(COURSE_POSTS)) if i not in (0, 1)]
             # random.shuffle(post_indices)
-
+            first_done = is_first_rotation_done(chat_id)
+            per_post_delay = COURSE_POST_DELAY if not first_done else ROTATION_DELAY
             for i in post_indices:
-                await _wait_quiet_since_last_bot_message(chat_id, COURSE_POST_DELAY)
+                await _wait_quiet_since_last_bot_message(chat_id, per_post_delay)
                 try:
                     text = COURSE_POSTS[i]
                     reply_markup = kb_course_2()
@@ -895,9 +908,6 @@ async def send_course_posts(chat_id: int):
                     return
                 except Exception as e:
                     logging.warning("Failed to send course post %d to %s: %s", i + 1, chat_id, e)
-
-            await asyncio.sleep(6 * 60 * 60 - COURSE_POST_DELAY)
-
     finally:
         SENDING_POSTS.discard(chat_id)
 
