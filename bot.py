@@ -908,6 +908,8 @@ async def send_course_posts(chat_id: int):
                     return
                 except Exception as e:
                     logging.warning("Failed to send course post %d to %s: %s", i + 1, chat_id, e)
+            if not first_done:
+                set_first_rotation_done(chat_id, True)
     finally:
         SENDING_POSTS.discard(chat_id)
 
