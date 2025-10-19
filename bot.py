@@ -62,7 +62,7 @@ BANNER_AFTER5 = os.getenv("BANNER_AFTER5", "")
 BANNER_BLOCK6 = os.getenv("BANNER_BLOCK6", "")
 BANNER_BLOCK7 = os.getenv("BANNER_BLOCK7", "")
 
-WELCOME_VIDEO_FILE = os.getenv("WELCOME_VIDEO_FILE", "")  # e.g., "videos/welcome.mp4"
+WELCOME_VIDEO_FILE = os.getenv("WELCOME_VIDEO_FILE", "videos/welcome.mp4")  # e.g., "videos/welcome.mp4"
 
 L3_FOLLOWUP_VIDEO = os.getenv("L3_FOLLOWUP_VIDEO", "")
 L3_FOLLOWUP_CAPTION = os.getenv("L3_FOLLOWUP_CAPTION", "")
@@ -93,6 +93,9 @@ ACCESS_REM_DELAYS = [
     if x.strip().isdigit()
 ]
 
+COURSE_POST_DELAY = int(os.getenv("COURSE_POST_DELAY", "18000"))
+LAST_BOT_MESSAGE_TS: dict[int, float] = {}
+
 MARK_REMIND_DELAY_1 = int(os.getenv("MARK_REMIND_DELAY_1", "300"))
 MARK_REMIND_DELAY_2 = int(os.getenv("MARK_REMIND_DELAY_2", "300"))
 
@@ -110,6 +113,7 @@ async def send_admin_message(text: str):
 router = Router()
 DEEP_LINK = ""  # заполним в main()
 SENDING_POSTS: set[int] = set()  # chat_ids that are already sending course posts
+VIDEO_NOTE_SENT: set[int] = set()
 
 # ========= ХРАНИЛКА ПРОГРЕССА (файл) =========
 stats_file = DATA_DIR / "stats.json"
@@ -188,6 +192,18 @@ def set_loop_stopped(uid: int, stopped: bool):
 
 # ========= HELPER FUNCTIONS =========
 
+def _mark_bot_sent(chat_id: int):
+    LAST_BOT_MESSAGE_TS[chat_id] = time()
+
+async def _wait_quiet_since_last_bot_message(chat_id: int, delay: int):
+    while True:
+        last = LAST_BOT_MESSAGE_TS.get(chat_id, 0)
+        passed = time() - last
+        remaining = delay - passed
+        if remaining <= 0:
+            return
+        await asyncio.sleep(min(5, max(1, int(remaining))))
+
 def smart_truncate(text: str, max_length: int = 700) -> tuple[str, str]:
     """Truncate text intelligently to max_length, preferring sentence boundaries.
     Returns (truncated_text, remainder)"""
@@ -229,16 +245,20 @@ async def send_block(chat_id: int, banner_url: str, text: str,
                 try:
                     photo = FSInputFile(banner_url)
                     await bot.send_photo(chat_id, photo, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
+                    _mark_bot_sent(chat_id)
                     return
                 except Exception as e:
                     logging.warning("Failed to send local image %s: %s, falling back to text message", banner_url, e)
                     await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+                    _mark_bot_sent(chat_id)
                     return
 
             # It's a URL, send as before
             await bot.send_photo(chat_id, banner_url, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
+            _mark_bot_sent(chat_id)
         else:
             await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+            _mark_bot_sent(chat_id)
     except TelegramBadRequest as e:
         if "wrong type of the web page content" in str(e) or "failed to get HTTP URL content" in str(e):
             logging.warning("Banner URL '%s' rejected by Telegram. Trying to extract direct image URL from Imgur album for chat %s...", banner_url, chat_id)
@@ -249,12 +269,14 @@ async def send_block(chat_id: int, banner_url: str, text: str,
                 direct_url = f"https://i.imgur.com/{album_id}.jpg"
                 try:
                     await bot.send_photo(chat_id, direct_url, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
+                    _mark_bot_sent(chat_id)
                     logging.info("Successfully sent direct image URL %s for chat %s", direct_url, chat_id)
                     return
                 except Exception:
                     pass
             logging.warning("Could not extract direct image URL, falling back to text message for chat %s", chat_id)
             await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+            _mark_bot_sent(chat_id)
         else:
             logging.exception("TelegramBadRequest in send_block for chat %s: %s", chat_id, e)
     except TelegramForbiddenError:
@@ -267,8 +289,10 @@ async def send_url_only(chat_id: int, url: str, reply_markup=None):
     """Отправить только ссылку (без текста)"""
     try:
         await bot.send_message(chat_id, url, reply_markup=reply_markup, disable_web_page_preview=False)
+        _mark_bot_sent(chat_id)
     except Exception:
         await bot.send_message(chat_id, url, reply_markup=reply_markup)
+        _mark_bot_sent(chat_id)
 
 async def is_subscribed_telegram(user_id: int) -> bool:
     """True, если дневник = Telegram-канал и юзер там участник"""
@@ -428,7 +452,7 @@ GATE_BEFORE_L3 = (
 )
 
 
-BLOCK_6 = """"<b>Хочешь освоить P2P и начать зарабатывать от $100 в день?</b>\n\n
+BLOCK_6 = """<b>Хочешь освоить P2P и начать зарабатывать от $100 в день?</b>\n\n
 <i>Я представляю тебе мини-курс, в котором:</i>\n
 <i>— 5 уроков по 30 минут</i>\n
 <i>— рабочая связка которая приносит от 100$ ежедневно. Твоя задача повторять ее за мной и внедрить в свою жизнь</i> \n
@@ -446,6 +470,7 @@ BLOCK_7 = """Как ты уже понял, <b>у меня есть личное
 • Уникальное комьюнити, где есть как специалисты из разных областей, так и владельцы крупных компаний.\n\n
 <blockquote>И это только часть того, что ждёт внутри — многое остаётся под завесой 😉</blockquote>\n\n
 Чтобы попасть в следующий поток, заполняй гугл-форму ниже или связывайся со мной @hrybovsky
+
 https://docs.google.com/forms/d/e/1FAIpQLSfFZkXzO7DwoCFZRN-u_4iR6xEQRfaOSlKX9b5AnVRzEkZ7fw/viewform?usp=header"""
 
 COURSE_POSTS = [
@@ -496,12 +521,12 @@ COURSE_POSTS = [
 А теперь вопрос к тебе: ты с нами или будешь дальше наблюдать за результатами других и потом жалеть, что не зашёл вовремя?""",
 
     # Пост 5
-    """Сейчас Р2Р для меня - это профессия и основной доход для меня. Но когда я только заходил в эту сферу я ошибочно считал это «темкой» на несколько месяцев
+    """<b>Сейчас Р2Р для меня - это профессия и основной доход для меня.</b> Но когда я только заходил в эту сферу я ошибочно считал это «темкой» на несколько месяцев
 
-Со временем я понял что Р2Р это далеко не темка а прогнозируемый бизнес на дистанции который дает хорошие результаты. И результат не заставил себя ждать, через какое-то время работы я купил себе Mercedes 
+🔷Со временем я понял что Р2Р это далеко не темка а прогнозируемый бизнес на дистанции который дает хорошие результаты. И результат не заставил себя ждать, через какое-то время работы я купил себе Mercedes 
 
-P2P  дало мне свободу. Где нету начальника, привязанности к месту и потолка дохода. Благодаря Р2Р я могу не переживать о завтрашнем дне и что не менее важно провести его как в Польше так и в Испании
-
+<b>P2P  дало мне свободу.</b>
+<blockquote>Где нету начальника, привязанности к месту и потолка дохода. Благодаря Р2Р я могу не переживать о завтрашнем дне и что не менее важно провести его как в Польше так и в Испании</blockquote>
 
 <i>И вот в этом для меня смысл: я нашёл своё дело, которое не привязано ни к конкретной стране, ни к конкретному работодателю. У меня есть ноутбук, телефон и рынок, который работает 24/7.
 Кто-то всю жизнь ищет «свою профессию». А я могу сказать честно: я её нашёл. Для меня P2P — это профессия будущего, которая уже сегодня даёт то, к чему многие идут годами: стабильный доход, свободу и независимость</i>""",
@@ -555,6 +580,30 @@ P2P  дало мне свободу. Где нету начальника, пр�
 <i>Самое важное, что нужно понять новичку: Р2Р — это не «темка», а полноценный бизнес, в который нужно вкладывать силы и время.</i>
 
 <blockquote>Я могу дать тебе все необходимые знания, чтобы ты начал развиваться в этой сфере. Вопрос: готов ли ты их взять?</blockquote>""",
+
+    #Just a video
+    "",
+
+    # Пост 9
+    """<b>Серафим давно знал о сфере P2P. Он слышал о ней ещё несколько лет назад, но всё это время боялся попробовать — не хватало уверенности и понимания, с чего начать.</b> 
+
+Когда он узнал обо мне, мы пообщались, и я объяснил ему, что в этой сфере нельзя проебаться, если действовать с умом. 
+
+После этого Серафим решился попробовать себя в P2P и четыре месяца назад пришёл ко мне на обучение.
+
+<i>С тех пор он активно работает в этой сфере, совмещая её с учёбой в университете. Ему хватает всего нескольких часов в день, чтобы закрывать ордера — прямо во время пар или занимаясь своими делами. 
+За это время он смог встроить P2P в свою повседневную жизнь и добиться стабильных результатов.</i>
+
+<blockquote>А с первых заработанных денег Серафим купил себе <b>новенький iPhone 16 Pro</b>
+Р2Р дает не только свободну в плане финансов, а так же и помогает достигать целей</blockquote>""",
+
+    # Пост 10
+    """Когда я начинал заниматься Р2Р - был студентом сам. И я лично на своем опыте знаю какого это, учится и быть практически без денег. 
+
+<blockquote>Вариант совмещать Р2Р с учебой очень хороший. Он позволяет каждому учится и паралельно работать в Онлайне и иметь от 1000$+</blockquote>
+По поводу обучения Серафим отзывается так :
+
+<blockquote>Поначалу было страшно что не получится и боялся потерять деньги. Со временем, когда уже получил все нужные ответы на свои вопросы - стало полегче и понятнее. С этого момента и понеслась полноценная работа</blockquote>"""
     ]
 # New variables for course posts media
 COURSE_POST_PHOTOS = [
@@ -568,24 +617,51 @@ COURSE_POST_PHOTOS = [
     "https://files.fm/thumb_show.php?i=mdvutpnw27",
     BANNER_BLOCK6,
     BANNER_BLOCK7,
+    "https://files.fm/thumb_show.php?i=3z64keef56",
+    "https://files.fm/thumb_show.php?i=e45f6vdq3w",
+    "https://files.fm/thumb_show.php?i=2xu22t23sa"
 ]
 
 COURSE_POST_VIDEOS = {
-    6: {
+    6: [{
         "path": "videos/post_2.MOV",
         "height": 1280,
         "width": 720,
-    },
-    7: {
+    }],
+    7: [{
         "path": "videos/post_5.MP4",
         "height": 1280,
         "width": 624,
-    },
-    9: {
+    }],
+    9: [{
         "path": "videos/post_7.MOV",
         "height": 1280,
         "width": 720,
-    },
+    }],
+    10: [{
+        "path": "videos/just_a_video.MP4",
+        "height": 1280,
+        "width": 720,
+    }],
+    11: [
+        {
+            "path": "videos/post_9_1.MP4",
+            "height": 1280,
+            "width": 720,
+        },
+        {
+            "path": "videos/post_9_2.MP4",
+            "height": 1280,
+            "width": 720,
+        }
+    ],
+    12: [
+        {
+            "path": "videos/post_10.MP4",
+            "height": 1280,
+            "width": 720,
+        },
+    ]
 }
 
 COURSE_POST_MEDIA = {
@@ -596,6 +672,8 @@ COURSE_POST_MEDIA = {
     4: [9],
     5: [0, 1],  # first two photos
     8: [3, 4, 5],  # fourth, fifth, sixth photos
+    11: [10],
+    12: [11, 12]
 }
 
 # ========= ДОСТУП/НАПОМИНАНИЯ =========
@@ -607,7 +685,12 @@ ACCESS_NUDGE_TEXTS = [
  # === Рассылка 8 постов по 1 каждые 5 часов ===
 def kb_course() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="Мини курс Р2Р", url=SITE_URL))
+    kb.row(InlineKeyboardButton(text="Получить доступ", url=SITE_URL))
+    return kb.as_markup()
+
+def kb_course_2() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="Мини курс по P2P", url=SITE_URL))
     return kb.as_markup()
 
 
@@ -637,6 +720,7 @@ async def _send_file_with_fallback(chat_id: int, file_path_or_id: str, caption: 
         try:
             video = FSInputFile(resolved_file_path)
             await bot.send_video(chat_id, video, caption=caption, reply_markup=reply_markup)
+            _mark_bot_sent(chat_id)
             logging.info("Sent local video file %s to chat %s", resolved_file_path, chat_id)
             return "local_video"
         except TelegramEntityTooLarge as e:
@@ -644,6 +728,7 @@ async def _send_file_with_fallback(chat_id: int, file_path_or_id: str, caption: 
             try:
                 document = FSInputFile(resolved_file_path)
                 await bot.send_document(chat_id, document, caption=caption, reply_markup=reply_markup)
+                _mark_bot_sent(chat_id)
                 logging.info("Sent local video file %s as document to chat %s", resolved_file_path, chat_id)
                 return "local_document"
             except Exception as doc_e:
@@ -676,9 +761,11 @@ async def _send_file_with_fallback(chat_id: int, file_path_or_id: str, caption: 
         if _looks_like_videonote(file_id):
             try:
                 await bot.send_video_note(chat_id, file_id)
+                _mark_bot_sent(chat_id)
                 logging.info("Sent as video_note (file_id) to chat %s", chat_id)
                 if caption or reply_markup:
                     await bot.send_message(chat_id, caption or " ", reply_markup=reply_markup)
+                    _mark_bot_sent(chat_id)
                 return "video_note"
             except TelegramBadRequest:
                 logging.warning("Failed to send %s as video_note, trying as video.", file_id)
@@ -688,6 +775,7 @@ async def _send_file_with_fallback(chat_id: int, file_path_or_id: str, caption: 
 
         # Попытка №2: отправить как обычное видео
         await bot.send_video(chat_id, file_id, caption=caption, reply_markup=reply_markup)
+        _mark_bot_sent(chat_id)
         logging.info("Sent as video (file_id) to chat %s", chat_id)
         return "video"
 
@@ -712,25 +800,72 @@ async def send_course_posts(chat_id: int):
     SENDING_POSTS.add(chat_id)
 
     try:
-        await asyncio.sleep(10)  # Wait 10 seconds before starting
         while True:
-            for i, text in enumerate(COURSE_POSTS):
-                next_stage = get_stage(chat_id) + 1
-                if (next_stage < 5 and i > 1) or (next_stage == 5 and i < 2):
-                    continue
+            await _wait_quiet_since_last_bot_message(chat_id, COURSE_POST_DELAY)
+            stage = get_stage(chat_id)
 
-                if next_stage == 4:
-                    await send_url_only(chat_id, LESSON3_URL)
-                    set_stage(chat_id, next_stage)
-                    continue
+            if stage < 2:
+                set_stage(chat_id, 2)
+                continue
 
-                if i:
-                    await asyncio.sleep(1800)  # 5 hours between posts (18000 seconds)
+            if stage == 2:
+                await send_url_only(chat_id, LESSON1_URL)
+                await asyncio.sleep(2)
+                await send_block(chat_id, BANNER_AFTER3, AFTER_L1, reply_markup=kb_open(2), parse_mode=ParseMode.HTML)
+                _mark_bot_sent(chat_id)
+                set_stage(chat_id, 3)
+                continue
+
+            if stage == 3:
+                await send_block(chat_id, COURSE_POST_PHOTOS[2], COURSE_POSTS[0], reply_markup=kb_open(2), parse_mode=ParseMode.HTML)
+                _mark_bot_sent(chat_id)
+                set_stage(chat_id, 4)
+                continue
+
+            if stage == 4:
+                await send_url_only(chat_id, LESSON2_URL)
+                await asyncio.sleep(2)
+                await send_block(chat_id, BANNER_AFTER5, AFTER_L2, reply_markup=kb_open(3), parse_mode=ParseMode.HTML)
+                _mark_bot_sent(chat_id)
+                set_stage(chat_id, 5)
+                continue
+
+            if stage == 5:
+                await send_block(chat_id, COURSE_POST_PHOTOS[7], COURSE_POSTS[1], reply_markup=kb_open(3), parse_mode=ParseMode.HTML)
+                _mark_bot_sent(chat_id)
+                set_stage(chat_id, 6)
+                continue
+
+            if stage == 6:
+                await send_block(chat_id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3(), parse_mode=ParseMode.HTML)
+                _mark_bot_sent(chat_id)
+                set_stage(chat_id, 7)
+                continue
+
+            if stage == 7:
+                await send_url_only(chat_id, LESSON3_URL)
+                _mark_bot_sent(chat_id)
+                set_stage(chat_id, 8)
+                continue
+
+            if stage == 8:
+                if chat_id not in VIDEO_NOTE_SENT:
+                    await bot.send_video_note(chat_id, FSInputFile(WELCOME_VIDEO_FILE))
+                    _mark_bot_sent(chat_id)
+                    VIDEO_NOTE_SENT.add(chat_id)
+                set_stage(chat_id, 9)
+                continue
+
+            post_indices = [i for i in range(len(COURSE_POSTS)) if i not in (0, 1)]
+            # random.shuffle(post_indices)
+
+            for i in post_indices:
+                await _wait_quiet_since_last_bot_message(chat_id, COURSE_POST_DELAY)
                 try:
-                    reply_markup = kb_course()
-                    next_stage = get_stage(chat_id) + 1
-                    if next_stage < 5:
-                        reply_markup = kb_open(next_stage)
+                    text = COURSE_POSTS[i]
+                    reply_markup = kb_course_2()
+                    if i == 5:
+                        reply_markup = None
 
                     if i in COURSE_POST_MEDIA or i in COURSE_POST_VIDEOS:
                         media_group = MediaGroupBuilder(caption=text)
@@ -738,28 +873,31 @@ async def send_course_posts(chat_id: int):
                             for photo_index in COURSE_POST_MEDIA[i]:
                                 media_group.add_photo(media=COURSE_POST_PHOTOS[photo_index])
                         if i in COURSE_POST_VIDEOS:
-                            video_file = COURSE_POST_VIDEOS[i]["path"]
-                            media_group.add_video(media=FSInputFile(video_file),
-                                                  height=COURSE_POST_VIDEOS[i]["height"],
-                                                  width=COURSE_POST_VIDEOS[i]["width"]
-                                                  )
-
+                            for data in COURSE_POST_VIDEOS[i]:
+                                media_group.add_video(
+                                    media=FSInputFile(data["path"]),
+                                    height=data.get("height"),
+                                    width=data.get("width"),
+                                )
                         msg = await bot.send_media_group(chat_id, media_group.build())
-                        try:
-                            await msg[0].edit_reply_markup(reply_markup=reply_markup)
-                        except TelegramBadRequest:
-                            await bot.send_message(chat_id, "Мини курс по Р2Р", reply_markup=reply_markup)
+                        _mark_bot_sent(chat_id)
+                        if reply_markup is not None:
+                            try:
+                                await msg[0].edit_reply_markup(reply_markup=reply_markup)
+                            except TelegramBadRequest:
+                                await bot.send_message(chat_id, "Мини курс по Р2Р", reply_markup=kb_course())
+                                _mark_bot_sent(chat_id)
                     else:
                         await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-
-                    if next_stage < 5:
-                        set_stage(chat_id, next_stage)
-
+                        _mark_bot_sent(chat_id)
                 except TelegramForbiddenError:
-                    break
+                    SENDING_POSTS.discard(chat_id)
+                    return
                 except Exception as e:
                     logging.warning("Failed to send course post %d to %s: %s", i + 1, chat_id, e)
-            await asyncio.sleep(18000)
+
+            await asyncio.sleep(6 * 60 * 60 - COURSE_POST_DELAY)
+
     finally:
         SENDING_POSTS.discard(chat_id)
 
@@ -772,6 +910,7 @@ async def access_nurture(user_id: int):
         txt = ACCESS_NUDGE_TEXTS[min(i, len(ACCESS_NUDGE_TEXTS) - 1)]
         try:
             await bot.send_message(user_id, txt, reply_markup=kb_access())
+            _mark_bot_sent(user_id)
         except TelegramForbiddenError:
             break
         except Exception as e:
@@ -790,6 +929,7 @@ async def remind_if_not_opened(user_id: int, stage_expected: int, delay: int):
         try:
             await bot.send_message(user_id, texts[stage_expected], reply_markup=kb_open(stage_expected),
                                    parse_mode=ParseMode.MARKDOWN)
+            _mark_bot_sent(user_id)
         except Exception as e:
             logging.warning("PM reminder failed: %s", e)
 
@@ -823,6 +963,7 @@ async def on_get_access(m: Message):
         
     # Reply to the user's message, removing the ReplyKeyboardMarkup
     sent_message = await m.answer("ДОСТУП ПОЛУЧЕН! 🔓 Уроки доступны.", reply_markup=ReplyKeyboardRemove())
+    _mark_bot_sent(m.chat.id)
 
     # Schedule deletion of the message after 1 second
     asyncio.create_task(delete_message_after_delay(m.chat.id, sent_message.message_id, 1))
@@ -848,37 +989,47 @@ async def on_buy_course(cb: CallbackQuery):
     await cb.answer("Открываю ссылку на курс...")
     set_loop_stopped(cb.from_user.id, True)
     await cb.message.answer(f"Вот ссылка на курс: {SITE_URL}")
+    _mark_bot_sent(cb.message.chat.id)
 
 
 @router.callback_query(F.data.startswith("open:"))
-
 async def on_open(cb: CallbackQuery):
     await cb.answer()
-    await cb.message.edit_reply_markup(reply_markup=None)
-
     try:
         n = int(cb.data.split(":")[1])
     except Exception:
         return
 
     uid = cb.from_user.id
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
-    if n == 3:
-        await send_block(cb.message.chat.id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3(), parse_mode=ParseMode.HTML)
-
-
-    URLS = {1: LESSON1_URL, 2: LESSON2_URL}
-    if n != 3:
-        await send_url_only(cb.message.chat.id, URLS[n])
-
-    stage = get_stage(uid)
-    if n > stage:
-        set_stage(uid, n)
-
-    # Урок 1 и 2 → автопереход
     if n in (1, 2):
+        URLS = {1: LESSON1_URL, 2: LESSON2_URL}
+        await send_url_only(cb.message.chat.id, URLS[n])
+        _mark_bot_sent(cb.message.chat.id)
+        stage = get_stage(uid)
+        if n > stage:
+            set_stage(uid, n)
         await asyncio.sleep(1)
         asyncio.create_task(auto_send_next_lesson(uid, n))
+        return
+
+    if n == 3:
+        stage = get_stage(uid)
+        if stage < 7:
+            await send_block(cb.message.chat.id, BANNER_AFTER2, GATE_BEFORE_L3, reply_markup=kb_subscribe_then_l3(), parse_mode=ParseMode.HTML)
+            _mark_bot_sent(cb.message.chat.id)
+            if stage < 6:
+                set_stage(uid, 6)
+        else:
+            await send_url_only(cb.message.chat.id, LESSON3_URL)
+            _mark_bot_sent(cb.message.chat.id)
+            if stage < 8:
+                set_stage(uid, 8)
+        return
 
 
     # Урок 3 → блоки и рассылка постов
@@ -903,6 +1054,7 @@ async def capture_video_note(m: Message):
     _write(d)
     logging.info("Captured and saved L3_FOLLOWUP_FILE as file_id=%s", fid)
     await m.reply("Сохранил file_id в store (stats.json). Теперь можно использовать /test_l3.", parse_mode=None)
+
 @router.callback_query(F.data == "check_diary")
 async def check_diary(cb: CallbackQuery):
     await cb.answer("Проверяем подписку...", show_alert=False)
@@ -914,12 +1066,15 @@ async def check_diary(cb: CallbackQuery):
 
     # if await is_subscribed_telegram(uid):
         # Убираем кнопки после нажатия
-    await cb.message.edit_reply_markup(reply_markup=None)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
     # Отправляем файл L3_FOLLOWUP_FILE
     await _send_file_with_fallback(cb.message.chat.id, L3_FOLLOWUP_FILE, None)
     # Отправляем ссылку на 3 урок
     URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
-    set_stage(uid, 4)
+    set_stage(uid, 8)
     await send_url_only(cb.message.chat.id, URLS[3])
     # else:
     #     txt = (
@@ -959,12 +1114,15 @@ async def test_l3(m: Message):
     file_or_id = L3_FOLLOWUP_FILE
     if not file_or_id:
         return await m.answer("L3_FOLLOWUP_FILE порожній у .env", parse_mode=None)
+    _mark_bot_sent(m.chat.id)
     try:
         result = await _send_file_with_fallback(m.chat.id, file_or_id, L3_FOLLOWUP_CAPTION or None)
         await m.answer(f"Результат отправки: {result}", parse_mode=None)
+        _mark_bot_sent(m.chat.id)
     except Exception as e:
         logging.exception("test_l3 failed: %s", e)
         await m.answer(f"❌ Не вдалося надіслати: {e}", parse_mode=None)
+        _mark_bot_sent(m.chat.id)
 
 @router.message(F.forward_from_chat)
 async def on_forwarded_from_channel(message: Message):
@@ -972,6 +1130,7 @@ async def on_forwarded_from_channel(message: Message):
     await message.answer(
         f"Название: {ch.title}\nID: <code>{ch.id}</code>"
     )
+    _mark_bot_sent(message.chat.id)
 
 @router.message(Command("diag"))
 async def diag(m: Message):
@@ -982,6 +1141,7 @@ async def diag(m: Message):
         f"NEXT_AFTER_1/2={NEXT_AFTER_1}/{NEXT_AFTER_2}",
         parse_mode=ParseMode.MARKDOWN
     )
+    _mark_bot_sent(m.chat.id)
 
 @router.message(Command("stats"))
 async def stats(m: Message):
@@ -989,6 +1149,7 @@ async def stats(m: Message):
         return
     d = _read()
     await m.answer(f"Users tracked: {len(d.get('users', {}))}")
+    _mark_bot_sent(m.chat.id)
 
 @router.message(Command("test_error"))
 async def test_error(m: Message):
@@ -997,6 +1158,7 @@ async def test_error(m: Message):
     # Test the error notification system
     await send_admin_message("🧪 Test notification: Error notification system is working!")
     await m.answer("Test notification sent to admin.")
+    _mark_bot_sent(m.chat.id)
 
 def extract_file_id(msg: Message):
     ct = msg.content_type
