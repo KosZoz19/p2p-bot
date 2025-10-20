@@ -1076,25 +1076,25 @@ async def check_diary(cb: CallbackQuery):
     # Делаем небольшую паузу, чтобы дать Telegram время обработать подписку
     await asyncio.sleep(3) 
 
-    # if await is_subscribed_telegram(uid):
+    if await is_subscribed_telegram(uid):
         # Убираем кнопки после нажатия
-    try:
-        await cb.message.edit_reply_markup(reply_markup=None)
-    except TelegramBadRequest:
-        pass
-    # Отправляем файл L3_FOLLOWUP_FILE
-    await _send_file_with_fallback(cb.message.chat.id, L3_FOLLOWUP_FILE, None)
-    # Отправляем ссылку на 3 урок
-    URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
-    set_stage(uid, 8)
-    await send_url_only(cb.message.chat.id, URLS[3])
-    # else:
-    #     txt = (
-    #         "Пока не вижу твою подписку на дневник.\n"
-    #         "Нажми «Подписаться на дневник», подпишись, и затем снова жми «ПРОВЕРИТЬ»."
-    #     )
-    #     # Не убираем кнопки, если проверка не удалась
-    #     await cb.message.answer(txt, reply_markup=kb_subscribe_then_l3())
+        try:
+            await cb.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
+        # Отправляем файл L3_FOLLOWUP_FILE
+        await _send_file_with_fallback(cb.message.chat.id, L3_FOLLOWUP_FILE, None)
+        # Отправляем ссылку на 3 урок
+        URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
+        set_stage(uid, 8)
+        await send_url_only(cb.message.chat.id, URLS[3])
+    else:
+        txt = (
+            "Пока не вижу твою подписку на дневник.\n"
+            "Нажми «Подписаться на дневник», подпишись, и затем снова жми «ПРОВЕРИТЬ»."
+        )
+        # Не убираем кнопки, если проверка не удалась
+        await cb.message.answer(txt, reply_markup=kb_subscribe_then_l3())
 
 
 @router.chat_join_request()
