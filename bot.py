@@ -2,18 +2,17 @@ import asyncio
 import json
 import os
 import logging
-import random
 from pathlib import Path
 from time import time
 from typing import Dict, Any
-from aiogram.types import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InputMediaVideo, InputFile
+from aiogram.types import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.enums.chat_member_status import ChatMemberStatus
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ContentType
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup,
-    InlineKeyboardButton, ChatJoinRequest, InputMediaPhoto, FSInputFile
+    InlineKeyboardButton, ChatJoinRequest, FSInputFile
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest, TelegramEntityTooLarge
@@ -115,6 +114,7 @@ router = Router()
 DEEP_LINK = ""  # заполним в main()
 SENDING_POSTS: set[int] = set()  # chat_ids that are already sending course posts
 VIDEO_NOTE_SENT: set[int] = set()
+PROCESSING_CHECKS: set[int] = set()
 
 # ========= ХРАНИЛКА ПРОГРЕССА (файл) =========
 stats_file = DATA_DIR / "stats.json"
@@ -440,7 +440,7 @@ LESSON1_INTRO = (
 )
 AFTER_L1 = (
     "<b>Ты большой молодец, что посмотрел первый урок!</b> 🙌\n\n"
-    "<i>Я вложил в него много усилий и надеюсь, что он был для тебя полезен.</i>\n\n"
+    "<i>Я вложил в него много усилиний и надеюсь, что он был для тебя полезен.</i>\n\n"
     "Буду рад, если ты напишешь мне отзыв в <a href=\"https://www.instagram.com/grybovsky?igsh=MTNnZnN3NGs3bm5lNw==\">Instagram</a> и поделишься своими впечатлениями после просмотра.\n\n"
     "А теперь не будем тянуть — держи доступ ко второму уроку 🚀\n"
     "Напоминаю: в третьем уроке я раскрою схему, которую ты сможешь внедрить в свою работу и зарабатывать от 800$ в месяц!\n\n"
@@ -1069,32 +1069,39 @@ async def capture_video_note(m: Message):
 
 @router.callback_query(F.data == "check_diary")
 async def check_diary(cb: CallbackQuery):
-    await cb.answer("Проверяем подписку...", show_alert=False)
-    
     uid = cb.from_user.id
+    if uid in PROCESSING_CHECKS:
+        await cb.answer("Проверка уже идет, подождите...", show_alert=True)
+        return
 
-    # Делаем небольшую паузу, чтобы дать Telegram время обработать подписку
-    await asyncio.sleep(3) 
+    PROCESSING_CHECKS.add(uid)
+    try:
+        await cb.answer("Проверяем подписку...", show_alert=False)
 
-    if await is_subscribed_telegram(uid):
-        # Убираем кнопки после нажатия
-        try:
-            await cb.message.edit_reply_markup(reply_markup=None)
-        except TelegramBadRequest:
-            pass
-        # Отправляем файл L3_FOLLOWUP_FILE
-        await _send_file_with_fallback(cb.message.chat.id, L3_FOLLOWUP_FILE, None)
-        # Отправляем ссылку на 3 урок
-        URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
-        set_stage(uid, 8)
-        await send_url_only(cb.message.chat.id, URLS[3])
-    else:
-        txt = (
-            "Пока не вижу твою подписку на дневник.\n"
-            "Нажми «Подписаться на дневник», подпишись, и затем снова жми «ПРОВЕРИТЬ»."
-        )
-        # Не убираем кнопки, если проверка не удалась
-        await cb.message.answer(txt, reply_markup=kb_subscribe_then_l3())
+        if get_stage(uid) >= 8:
+            try:
+                await cb.message.edit_reply_markup(reply_markup=None)
+            except TelegramBadRequest:
+                pass
+            return
+
+        if await is_subscribed_telegram(uid):
+            try:
+                await cb.message.edit_reply_markup(reply_markup=None)
+            except TelegramBadRequest:
+                pass
+            await _send_file_with_fallback(cb.message.chat.id, L3_FOLLOWUP_FILE, None)
+            URLS = {1: LESSON1_URL, 2: LESSON2_URL, 3: LESSON3_URL}
+            set_stage(uid, 8)
+            await send_url_only(cb.message.chat.id, URLS[3])
+        else:
+            txt = (
+                "Пока не вижу твою подписку на дневник.\n"
+                "Нажми «Подписаться на дневник», подпишись, и затем снова жми «ПРОВЕРИТЬ»."
+            )
+            await cb.message.answer(txt, reply_markup=kb_subscribe_then_l3())
+    finally:
+        PROCESSING_CHECKS.discard(uid)
 
 
 @router.chat_join_request()
@@ -1326,5 +1333,3 @@ if __name__ == "__main__":
     else:
         logging.info("Running in webhook mode")
         asyncio.run(run_webhook())
-
-
